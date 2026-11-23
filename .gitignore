@@ -1,0 +1,9 @@
+data/
+data_local/
+*.db
+*.db-wal
+*.db-shm
+bin/
+athena-shield.exe
+athena-shield
+.env
