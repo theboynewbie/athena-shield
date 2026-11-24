@@ -160,15 +160,70 @@ func scanSysClassNet(netDir string) (physName, physSpeedLabel string, physMbps i
 	return physName, physSpeedLabel, physMbps, fallbackUp
 }
 
+func readNICDriver(ifaceDir string) string {
+	for _, p := range []string{
+		filepath.Join(ifaceDir, "device", "uevent"),
+		filepath.Join(filepath.Dir(filepath.Dir(ifaceDir)), "uevent"),
+	} {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(string(b), "\n") {
+			if strings.HasPrefix(line, "DRIVER=") {
+				return strings.TrimSpace(strings.TrimPrefix(line, "DRIVER="))
+			}
+		}
+	}
+	return ""
+}
+
+func friendlyDriverLabel(driver string) string {
+	switch strings.ToLower(strings.TrimSpace(driver)) {
+	case "virtio_net":
+		return "VirtIO NIC"
+	case "vmxnet3":
+		return "VMXNET3"
+	case "hv_netvsc":
+		return "Hyper-V NIC"
+	case "xen-netfront", "vif":
+		return "Xen NIC"
+	case "e1000", "e1000e":
+		return "1Gbps (e1000)"
+	case "":
+		return "Virtual NIC"
+	default:
+		return strings.ToUpper(driver) + " NIC"
+	}
+}
+
+func isIfaceUp(ifaceDir string) bool {
+	opBytes, err := os.ReadFile(filepath.Join(ifaceDir, "operstate"))
+	if err != nil {
+		return false
+	}
+	op := strings.TrimSpace(string(opBytes))
+	if op == "up" {
+		return true
+	}
+	if op == "unknown" {
+		carBytes, err := os.ReadFile(filepath.Join(ifaceDir, "carrier"))
+		return err == nil && strings.TrimSpace(string(carBytes)) == "1"
+	}
+	return false
+}
+
 func scanPCINetDevices(devicesDir string) (physName, physSpeedLabel string, physMbps int) {
 	topEntries, err := os.ReadDir(devicesDir)
 	if err != nil {
 		return "", "", 0
 	}
 
+	var fallbackVMName, fallbackVMLabel string
+
 	var walk func(dir string, depth int)
 	walk = func(dir string, depth int) {
-		if depth > 5 {
+		if depth > 6 {
 			return
 		}
 		entries, err := os.ReadDir(dir)
@@ -195,33 +250,29 @@ func scanPCINetDevices(devicesDir string) (physName, physSpeedLabel string, phys
 						continue
 					}
 					ifaceDir := filepath.Join(full, in)
-					opBytes, err := os.ReadFile(filepath.Join(ifaceDir, "operstate"))
-					if err != nil {
+					if !isIfaceUp(ifaceDir) {
 						continue
 					}
-					op := strings.TrimSpace(string(opBytes))
-					if op != "up" {
-						if op == "unknown" {
-							carBytes, err := os.ReadFile(filepath.Join(ifaceDir, "carrier"))
-							if err != nil || strings.TrimSpace(string(carBytes)) != "1" {
-								continue
+					drv := readNICDriver(ifaceDir)
+					displayName := in
+					if drv != "" {
+						displayName = fmt.Sprintf("%s (%s)", in, drv)
+					}
+
+					spBytes, spErr := os.ReadFile(filepath.Join(ifaceDir, "speed"))
+					if spErr == nil {
+						if mbps, err := strconv.Atoi(strings.TrimSpace(string(spBytes))); err == nil && mbps > 0 {
+							if mbps > physMbps {
+								physMbps = mbps
+								physName = displayName
+								physSpeedLabel = formatNICSpeed(mbps)
 							}
-						} else {
 							continue
 						}
 					}
-					spBytes, err := os.ReadFile(filepath.Join(ifaceDir, "speed"))
-					if err != nil {
-						continue
-					}
-					mbps, err := strconv.Atoi(strings.TrimSpace(string(spBytes)))
-					if err != nil || mbps <= 0 {
-						continue
-					}
-					if mbps > physMbps {
-						physMbps = mbps
-						physName = in
-						physSpeedLabel = formatNICSpeed(mbps)
+					if fallbackVMName == "" {
+						fallbackVMName = displayName
+						fallbackVMLabel = friendlyDriverLabel(drv)
 					}
 				}
 				continue
@@ -231,27 +282,83 @@ func scanPCINetDevices(devicesDir string) (physName, physSpeedLabel string, phys
 	}
 
 	for _, ent := range topEntries {
-		if ent.IsDir() && strings.HasPrefix(ent.Name(), "pci") {
-			walk(filepath.Join(devicesDir, ent.Name()), 1)
+		if !ent.IsDir() {
+			continue
+		}
+		n := ent.Name()
+		if strings.HasPrefix(n, "pci") || strings.HasPrefix(n, "vif") || strings.HasPrefix(n, "vmbus") {
+			walk(filepath.Join(devicesDir, n), 1)
 		}
 	}
-	return physName, physSpeedLabel, physMbps
+	if physName != "" {
+		return physName, physSpeedLabel, physMbps
+	}
+	return fallbackVMName, fallbackVMLabel, 0
+}
+
+func scanBusNetDevices(busDir string) (string, string, int) {
+	entries, err := os.ReadDir(busDir)
+	if err != nil {
+		return "", "", 0
+	}
+	for _, ent := range entries {
+		netDir := filepath.Join(busDir, ent.Name(), "net")
+		ifaces, err := os.ReadDir(netDir)
+		if err != nil {
+			continue
+		}
+		for _, iface := range ifaces {
+			in := iface.Name()
+			if isVirtualNICName(in) {
+				continue
+			}
+			ifaceDir := filepath.Join(netDir, in)
+			if !isIfaceUp(ifaceDir) {
+				continue
+			}
+			drv := readNICDriver(ifaceDir)
+			displayName := in
+			if drv != "" {
+				displayName = fmt.Sprintf("%s (%s)", in, drv)
+			}
+			if spBytes, err := os.ReadFile(filepath.Join(ifaceDir, "speed")); err == nil {
+				if mbps, err := strconv.Atoi(strings.TrimSpace(string(spBytes))); err == nil && mbps > 0 {
+					return displayName, formatNICSpeed(mbps), mbps
+				}
+			}
+			return displayName, friendlyDriverLabel(drv), 0
+		}
+	}
+	return "", "", 0
 }
 
 func readLinuxNIC() (string, string, int) {
+	if name, label, mbps := scanPCINetDevices("/host/sys/devices"); name != "" && mbps > 0 {
+		return name, label, mbps
+	}
+	if name, label, mbps := scanPCINetDevices("/sys/devices"); name != "" && mbps > 0 {
+		return name, label, mbps
+	}
+	if name, label, mbps, _ := scanSysClassNet("/host/sys/class/net"); name != "" {
+		return name, label, mbps
+	}
+	if name, label, mbps, _ := scanSysClassNet("/sys/class/net"); name != "" {
+		return name, label, mbps
+	}
+	// VM hypervisor NICs without numeric PHY speed (e.g., KVM/Proxmox virtio_net, Hyper-V hv_netvsc, Xen vif)
 	if name, label, mbps := scanPCINetDevices("/host/sys/devices"); name != "" {
 		return name, label, mbps
 	}
 	if name, label, mbps := scanPCINetDevices("/sys/devices"); name != "" {
 		return name, label, mbps
 	}
-	if name, label, mbps, _ := scanSysClassNet("/host/sys/class/net"); name != "" {
+	if name, label, mbps := scanBusNetDevices("/host/sys/bus/vmbus/devices"); name != "" {
 		return name, label, mbps
 	}
-	name, label, mbps, fallbackUp := scanSysClassNet("/sys/class/net")
-	if name != "" {
+	if name, label, mbps := scanBusNetDevices("/sys/bus/vmbus/devices"); name != "" {
 		return name, label, mbps
 	}
+	_, _, _, fallbackUp := scanSysClassNet("/sys/class/net")
 	if fallbackUp != "" {
 		return fallbackUp, "Virtual NIC", 0
 	}

@@ -190,4 +190,20 @@ func TestScanPCINetDevices(t *testing.T) {
 	if name != "enp2s0" || label != "1Gbps" || mbps != 1000 {
 		t.Fatalf("got (%q, %q, %d), want (\"enp2s0\", \"1Gbps\", 1000)", name, label, mbps)
 	}
+
+	// Simulate KVM/Proxmox VirtIO VM NIC where kernel speed=-1 and DRIVER=virtio_net
+	vmDir := t.TempDir()
+	virtioDev := filepath.Join(vmDir, "pci0000_00", "0000_00_03.0", "virtio0")
+	vmNIC := filepath.Join(virtioDev, "net", "ens18")
+	if err := os.MkdirAll(vmNIC, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(virtioDev, "uevent"), []byte("DRIVER=virtio_net\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(vmNIC, "operstate"), []byte("up\n"), 0o644)
+	_ = os.WriteFile(filepath.Join(vmNIC, "speed"), []byte("-1\n"), 0o644)
+
+	vName, vLabel, vMbps := scanPCINetDevices(vmDir)
+	if vName != "ens18 (virtio_net)" || vLabel != "VirtIO NIC" || vMbps != 0 {
+		t.Fatalf("got (%q, %q, %d), want (\"ens18 (virtio_net)\", \"VirtIO NIC\", 0)", vName, vLabel, vMbps)
+	}
 }
