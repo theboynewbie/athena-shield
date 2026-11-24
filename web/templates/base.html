@@ -72,8 +72,28 @@
             box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
         }
         html.dark .dasher-card {
-            background-color: #111622;
-            border-color: #1e293b;
+            background-color: #101726;
+            border-color: #1e2d4a;
+        }
+        .card-accent-blue { border-top: 2px solid #1D5CE0 !important; }
+        html.dark .card-accent-blue {
+            border-top: 2px solid #3B82F6 !important;
+            background-image: linear-gradient(180deg, rgba(29, 92, 224, 0.11) 0%, rgba(16, 23, 38, 0) 48%);
+        }
+        .card-accent-orange { border-top: 2px solid #E8762E !important; }
+        html.dark .card-accent-orange {
+            border-top: 2px solid #F5973E !important;
+            background-image: linear-gradient(180deg, rgba(232, 118, 46, 0.11) 0%, rgba(16, 23, 38, 0) 48%);
+        }
+        .card-accent-rose { border-top: 2px solid #f43f5e !important; }
+        html.dark .card-accent-rose {
+            border-top: 2px solid #fb7185 !important;
+            background-image: linear-gradient(180deg, rgba(244, 63, 94, 0.09) 0%, rgba(16, 23, 38, 0) 48%);
+        }
+        .card-accent-emerald { border-top: 2px solid #10b981 !important; }
+        html.dark .card-accent-emerald {
+            border-top: 2px solid #34d399 !important;
+            background-image: linear-gradient(180deg, rgba(16, 185, 129, 0.09) 0%, rgba(16, 23, 38, 0) 48%);
         }
         .tabular-nums {
             font-variant-numeric: tabular-nums;
@@ -182,7 +202,7 @@
             sidebarCollapsed ? 'md:w-[68px]' : 'md:w-60',
             mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         ]"
-        class="fixed md:sticky top-0 left-0 h-screen w-60 bg-white dark:bg-[#0d121d] border-r border-slate-200 dark:border-[#1e293b] border-t-2 border-t-[#1D5CE0] flex flex-col justify-between shrink-0 z-50 transition-all duration-150">
+        class="fixed md:sticky top-0 left-0 h-screen w-60 bg-white dark:bg-[#0d1321] border-r border-slate-200 dark:border-[#1e2d4a] border-t-2 border-t-[#1D5CE0] flex flex-col justify-between shrink-0 z-50 transition-all duration-150">
         <div class="overflow-y-auto overflow-x-hidden flex-1">
             <!-- Brand -->
             <div class="h-16 flex items-center px-4 border-b border-slate-100 dark:border-[#1e293b] justify-between">
@@ -200,53 +220,53 @@
 
             <!-- Navigation -->
             <nav class="p-2.5 space-y-0.5">
-                <div x-show="!sidebarCollapsed" class="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                <div x-show="!sidebarCollapsed" class="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-[#647aa3]">
                     Operations
                 </div>
 
                 <a href="/dashboard" title="Dashboard Telemetry"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "dashboard"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "dashboard"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-chart-pie w-4 text-center text-xs {{if eq .ActivePage "dashboard"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Telemetry</span>
                 </a>
 
                 <a href="/proxy-hosts" title="Reverse Proxy & SSL"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "proxy_hosts"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "proxy_hosts"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-network-wired w-4 text-center text-xs {{if eq .ActivePage "proxy_hosts"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Proxy & SSL</span>
                 </a>
 
                 <a href="/rules" title="Rules & Slot Keywords"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "rules"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "rules"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-shield-halved w-4 text-center text-xs {{if eq .ActivePage "rules"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">WAF Rules</span>
                 </a>
 
                 <a href="/logs" title="Audit & Attack Logs"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "logs"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "logs"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-file-lines w-4 text-center text-xs {{if eq .ActivePage "logs"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Audit Logs</span>
                 </a>
 
                 {{if eq .User.Role "super_admin"}}
-                <div x-show="!sidebarCollapsed" class="px-2.5 pt-4 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                <div x-show="!sidebarCollapsed" class="px-2.5 pt-4 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-[#647aa3]">
                     Admin
                 </div>
                 <div x-show="sidebarCollapsed" class="my-2 border-t border-zinc-100 dark:border-zinc-800"></div>
 
                 <a href="/users" title="User Management"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "users"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "users"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-user-shield w-4 text-center text-xs {{if eq .ActivePage "users"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Operators</span>
                 </a>
 
                 <a href="/settings" title="CSIRT, Storage & Backup"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "settings"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "settings"}}bg-[#1D5CE0]/10 dark:bg-[#1D5CE0]/22 text-[#1D5CE0] dark:text-[#93B8FF] border-l-2 border-[#1D5CE0] dark:border-[#3B82F6] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
                     <i class="fa-solid fa-sliders w-4 text-center text-xs {{if eq .ActivePage "settings"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Settings & Backup</span>
@@ -281,7 +301,7 @@
         {{if .User}}
         <!-- Compact Top Navbar -->
         <header x-data="hardwareTelemetry()" x-init="startTelemetry()"
-            class="h-14 bg-white/85 dark:bg-[#0a0e17]/85 backdrop-blur-md border-b border-slate-200 dark:border-[#1e293b] flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
+            class="h-14 bg-white/85 dark:bg-[#0a0e17]/85 backdrop-blur-md border-b border-slate-200 dark:border-[#1e2d4a] flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
             <div class="flex items-center gap-3">
                 <button @click="mobileMenuOpen = true" type="button"
                     class="md:hidden w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -301,9 +321,9 @@
             <!-- Inline Telemetry & Actions -->
             <div class="flex items-center gap-3 sm:gap-4 text-xs">
                 <div class="hidden sm:flex items-center gap-3 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
-                    <span>CPU <strong class="text-zinc-900 dark:text-zinc-100 font-medium" x-text="(sys.cpu_percent || 0) + '%'">0%</strong></span>
-                    <span class="text-zinc-300 dark:text-zinc-700">/</span>
-                    <span>RAM <strong class="text-zinc-900 dark:text-zinc-100 font-medium" x-text="(sys.ram_percent || 0) + '%'">0%</strong></span>
+                    <span>CPU <strong class="text-zinc-900 dark:text-[#60A5FA] font-medium" x-text="(sys.cpu_percent || 0) + '%'">0%</strong></span>
+                    <span class="text-zinc-300 dark:text-[#1e2d4a]">/</span>
+                    <span>RAM <strong class="text-zinc-900 dark:text-[#F5973E] font-medium" x-text="(sys.ram_percent || 0) + '%'">0%</strong></span>
                 </div>
 
                 <button @click="flushNginxCache()" :disabled="flushingCache" title="Bersihkan seluruh cache Nginx sekarang"
