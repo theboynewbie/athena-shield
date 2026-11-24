@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/theboynewbie/athena-shield/internal/auth"
@@ -293,9 +294,26 @@ func (sv *Server) apiDeleteProxyHost(w http.ResponseWriter, r *http.Request, use
 
 // ---- Stats ----
 
+var (
+	statsCacheMu      sync.Mutex
+	statsCachePayload map[string]any
+	statsCacheAt      time.Time
+	statsCacheVer     int64
+)
+
 func (sv *Server) apiStats(w http.ResponseWriter, r *http.Request, user *store.User) {
+	curVer := sv.store.Version()
+	statsCacheMu.Lock()
+	if statsCachePayload != nil && statsCacheVer == curVer && time.Since(statsCacheAt) < 3*time.Second {
+		cached := statsCachePayload
+		statsCacheMu.Unlock()
+		writeJSON(w, http.StatusOK, cached)
+		return
+	}
+	statsCacheMu.Unlock()
+
 	total, blocked, allowed, activeRules, attackers, breakdown, chart := sv.store.GetStats()
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"system":             ReadSystemMetrics(),
 		"total_requests":     total,
 		"blocked_requests":   blocked,
@@ -304,7 +322,15 @@ func (sv *Server) apiStats(w http.ResponseWriter, r *http.Request, user *store.U
 		"top_attackers":      attackers,
 		"attack_breakdown":   breakdown,
 		"chart":              chart,
-	})
+	}
+
+	statsCacheMu.Lock()
+	statsCachePayload = payload
+	statsCacheAt = time.Now()
+	statsCacheVer = curVer
+	statsCacheMu.Unlock()
+
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // ---- Rules ----

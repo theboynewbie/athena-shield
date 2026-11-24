@@ -440,6 +440,13 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 
 	var hdrBuilder strings.Builder
 	for k, vals := range r.Header {
+		switch strings.ToLower(k) {
+		case "user-agent", "accept", "accept-language", "accept-encoding", "connection",
+			"upgrade-insecure-requests", "sec-fetch-dest", "sec-fetch-mode", "sec-fetch-site",
+			"sec-fetch-user", "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform",
+			"cache-control", "pragma", "if-modified-since", "if-none-match", "content-length", "host":
+			continue
+		}
 		for _, v := range vals {
 			hdrBuilder.WriteString(k)
 			hdrBuilder.WriteByte(':')

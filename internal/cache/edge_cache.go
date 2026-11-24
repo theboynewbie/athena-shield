@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	DefaultTTL      = 60 * time.Second
-	MaxCacheEntries = 2000
-	MaxEntryBytes   = 2 * 1024 * 1024 // 2MB per HTML page
+	DefaultHTMLTTL   = 60 * time.Second
+	DefaultStaticTTL = 15 * time.Minute
+	MaxCacheEntries  = 4000
+	MaxEntryBytes    = 4 * 1024 * 1024 // 4MB max per cached item
 )
 
 var bypassCookies = []string{
@@ -31,6 +32,11 @@ var bypassPrefixes = []string{
 	"/xmlrpc.php", "/wp-json", "/api/", "/logout",
 }
 
+var staticExts = []string{
+	".css", ".js", ".jpg", ".jpeg", ".png", ".gif", ".ico", ".svg",
+	".woff", ".woff2", ".ttf", ".eot", ".webp",
+}
+
 type Entry struct {
 	StatusCode int
 	Headers    http.Header
@@ -49,7 +55,17 @@ func NewEdgeCache() *EdgeCache {
 	}
 }
 
-func ShouldBypass(r *http.Request) bool {
+func IsStaticAsset(path string) bool {
+	p := strings.ToLower(path)
+	for _, ext := range staticExts {
+		if strings.HasSuffix(p, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+func ShouldBypassHTML(r *http.Request) bool {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return true
 	}
@@ -76,8 +92,15 @@ func ShouldBypass(r *http.Request) bool {
 	return false
 }
 
-func CacheKey(scheme, method, host, path string) string {
-	return scheme + "|" + method + "|" + strings.ToLower(host) + "|" + path
+func ShouldBypassStatic(r *http.Request) bool {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return true
+	}
+	return !IsStaticAsset(r.URL.Path)
+}
+
+func CacheKey(scheme, method, host, uri string) string {
+	return scheme + "|" + method + "|" + strings.ToLower(host) + "|" + uri
 }
 
 func (c *EdgeCache) Get(key string) (Entry, bool) {
@@ -97,13 +120,15 @@ func (c *EdgeCache) Get(key string) (Entry, bool) {
 	return ent, true
 }
 
-func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte) {
+func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte, isStatic bool) {
 	if status != http.StatusOK || len(body) == 0 || len(body) > MaxEntryBytes {
 		return
 	}
-	ct := strings.ToLower(hdr.Get("Content-Type"))
-	if !strings.Contains(ct, "text/html") {
-		return
+	if !isStatic {
+		ct := strings.ToLower(hdr.Get("Content-Type"))
+		if !strings.Contains(ct, "text/html") {
+			return
+		}
 	}
 	cc := strings.ToLower(hdr.Get("Cache-Control"))
 	if strings.Contains(cc, "no-store") || strings.Contains(cc, "private") {
@@ -113,11 +138,19 @@ func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte) {
 	clonedHdr := make(http.Header, len(hdr))
 	for k, v := range hdr {
 		if strings.EqualFold(k, "Set-Cookie") {
-			return // Never cache responses setting cookies
+			if !isStatic {
+				return // Never cache HTML responses setting cookies
+			}
+			continue
 		}
 		cp := make([]string, len(v))
 		copy(cp, v)
 		clonedHdr[k] = cp
+	}
+
+	ttl := DefaultHTMLTTL
+	if isStatic {
+		ttl = DefaultStaticTTL
 	}
 
 	c.mu.Lock()
@@ -137,7 +170,7 @@ func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte) {
 		StatusCode: status,
 		Headers:    clonedHdr,
 		Body:       append([]byte(nil), body...),
-		ExpiresAt:  time.Now().Add(DefaultTTL),
+		ExpiresAt:  time.Now().Add(ttl),
 	}
 }
 

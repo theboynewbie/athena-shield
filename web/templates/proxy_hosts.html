@@ -540,28 +540,8 @@ function proxyApp() {
             }
 
             this.isDeploying = true;
-            this.deployProgress = 5;
-            this.deployStage = 'Memvalidasi konfigurasi...';
-
-            const isLetsEncrypt = this.form.ssl_type === 'letsencrypt';
-            const totalSimulatedTime = isLetsEncrypt ? 6500 : 2000;
-            const intervalTime = 100;
-            const stepIncrement = 85 / (totalSimulatedTime / intervalTime);
-
-            const progressTimer = setInterval(() => {
-                if (this.deployProgress < 92) {
-                    this.deployProgress = Math.min(92, Math.round(this.deployProgress + stepIncrement));
-                    if (this.deployProgress >= 10 && this.deployProgress < 30) {
-                        this.deployStage = 'Memeriksa DNS & hostname...';
-                    } else if (this.deployProgress >= 30 && this.deployProgress < 65) {
-                        this.deployStage = isLetsEncrypt ? 'Menerbitkan SSL Let\'s Encrypt...' : 'Memverifikasi sertifikat SSL...';
-                    } else if (this.deployProgress >= 65 && this.deployProgress < 85) {
-                        this.deployStage = 'Menulis VirtualHost Nginx...';
-                    } else if (this.deployProgress >= 85) {
-                        this.deployStage = 'Reload Nginx...';
-                    }
-                }
-            }, intervalTime);
+            this.deployProgress = 40;
+            this.deployStage = 'Menyimpan & menerapkan konfigurasi ke memori Go...';
 
             const method = this.isEdit ? 'PUT' : 'POST';
             const url = this.isEdit ? `/api/proxy-hosts/${this.form.id}` : '/api/proxy-hosts';
@@ -576,23 +556,19 @@ function proxyApp() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                clearInterval(progressTimer);
                 if (res.ok) {
                     this.deployProgress = 100;
                     this.deployStage = 'Deployment selesai!';
-                    setTimeout(async () => {
-                        this.isDeploying = false;
-                        this.showModal = false;
-                        await this.loadHosts();
-                        this.showToastNotification(`Domain ${this.form.domain_name} berhasil dideploy!`);
-                    }, 700);
+                    this.isDeploying = false;
+                    this.showModal = false;
+                    await this.loadHosts();
+                    this.showToastNotification(`Domain ${this.form.domain_name} berhasil dideploy!`);
                 } else {
                     this.isDeploying = false;
                     const data = await res.json();
                     alert(data.detail || "Gagal menyimpan konfigurasi host.");
                 }
             } catch (err) {
-                clearInterval(progressTimer);
                 this.isDeploying = false;
                 alert("Terjadi kesalahan jaringan saat deploy.");
             }

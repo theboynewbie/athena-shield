@@ -12,12 +12,13 @@ Write-Host " Login     : admin / GuardianWAF@2026" -ForegroundColor Yellow
 Write-Host " Proxy     : HTTP :8080 / HTTPS :8443" -ForegroundColor Gray
 Write-Host "=========================================================" -ForegroundColor Cyan
 
-if (Test-Path ".\athena-shield.exe") {
-    .\athena-shield.exe
-} else {
+if (-not (Test-Path ".\athena-shield.exe")) {
+    Write-Host "[ATHENA SHIELD] Building optimized binary..." -ForegroundColor Cyan
     $env:GOROOT = "C:\Users\muiss\.gemini\antigravity\scratch\tools\go"
     $env:GOPATH = "C:\Users\muiss\.gemini\antigravity\scratch\tools\gopath"
     $env:GOCACHE = "C:\Users\muiss\.gemini\antigravity\scratch\tools\gocache"
     $env:CGO_ENABLED = "0"
-    & "$env:GOROOT\bin\go.exe" run ./cmd/athena
+    & "$env:GOROOT\bin\go.exe" build -trimpath -ldflags="-s -w" -o .\athena-shield.exe ./cmd/athena
 }
+
+.\athena-shield.exe

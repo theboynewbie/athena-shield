@@ -40,6 +40,11 @@ type BlockPageData struct {
 	TimestampStr string
 }
 
+type compiledHost struct {
+	store.ProxyHost
+	targetURL *url.URL
+}
+
 type Router struct {
 	cfg       config.Config
 	store     *store.Store
@@ -51,7 +56,7 @@ type Router struct {
 	renderer  BlockRenderer
 	transport *http.Transport
 
-	hostsSnap atomic.Pointer[map[string]store.ProxyHost]
+	hostsSnap atomic.Pointer[map[string]compiledHost]
 }
 
 func NewRouter(
@@ -67,17 +72,21 @@ func NewRouter(
 	tr := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second,
-			KeepAlive: 60 * time.Second,
+			Timeout:   20 * time.Second,
+			KeepAlive: 90 * time.Second,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          300,
-		MaxIdleConnsPerHost:   150,
-		IdleConnTimeout:       60 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
+		MaxIdleConns:          500,
+		MaxIdleConnsPerHost:   250,
+		MaxConnsPerHost:       0,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: time.Duration(cfg.UpstreamTimeoutSec) * time.Second,
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			ClientSessionCache: tls.NewLRUClientSessionCache(256),
+		},
 	}
 
 	rt := &Router{
@@ -107,9 +116,13 @@ func (rt *Router) Reload() {
 	if err != nil {
 		return
 	}
-	m := make(map[string]store.ProxyHost, len(hosts))
+	m := make(map[string]compiledHost, len(hosts))
 	for _, h := range hosts {
-		m[strings.ToLower(strings.TrimSpace(h.DomainName))] = h
+		ch := compiledHost{ProxyHost: h}
+		if u, err := url.Parse(h.TargetUpstream); err == nil && u.Host != "" {
+			ch.targetURL = u
+		}
+		m[strings.ToLower(strings.TrimSpace(h.DomainName))] = ch
 	}
 	rt.hostsSnap.Store(&m)
 	if rt.tlsMgr != nil {
@@ -117,7 +130,7 @@ func (rt *Router) Reload() {
 	}
 }
 
-func (rt *Router) MatchHost(r *http.Request) (store.ProxyHost, bool) {
+func (rt *Router) matchCompiledHost(r *http.Request) (compiledHost, bool) {
 	hostHdr := r.Header.Get("X-Forwarded-Host")
 	if hostHdr == "" {
 		hostHdr = r.Host
@@ -125,18 +138,19 @@ func (rt *Router) MatchHost(r *http.Request) (store.ProxyHost, bool) {
 	clean := strings.ToLower(strings.TrimSpace(strings.SplitN(hostHdr, ":", 2)[0]))
 	mPtr := rt.hostsSnap.Load()
 	if mPtr == nil {
-		return store.ProxyHost{}, false
+		return compiledHost{}, false
 	}
 	h, ok := (*mPtr)[clean]
 	return h, ok
 }
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	host, found := rt.MatchHost(r)
+	ch, found := rt.matchCompiledHost(r)
 	if !found {
 		http.Error(w, "Athena Shield: Domain not configured", http.StatusNotFound)
 		return
 	}
+	host := ch.ProxyHost
 
 	if !host.IsActive {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -192,16 +206,15 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfCountry := r.Header.Get("CF-IPCountry")
 	fullURI := r.URL.RequestURI()
 
-	// Read body up to inspection cap (or 1024MB max proxy limit)
+	// Only read body if request actually has a payload (skip allocation on GET/HEAD/OPTIONS)
 	var bodyBytes []byte
-	if r.Body != nil {
+	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && r.ContentLength != 0 {
 		maxInspect := int64(rt.cfg.MaxNonMultipartBody + 1)
 		if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
 			maxInspect = int64(rt.cfg.MaxInspectBodyBytes)
 		}
 		limited := io.LimitReader(r.Body, maxInspect)
 		bodyBytes, _ = io.ReadAll(limited)
-		// Reconstruct r.Body so upstream receives full stream (inspected prefix + unread remainder)
 		r.Body = struct {
 			io.Reader
 			io.Closer
@@ -265,11 +278,13 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Turbo Edge HTML Micro-Cache Check
-	useEdgeCache := host.EdgeCacheEnabled && rt.edgeCache != nil && !cache.ShouldBypass(r)
+	// Edge Cache: Static Assets (always active for clean static GET/HEAD) + Turbo HTML (when host.EdgeCacheEnabled)
+	isStatic := !cache.ShouldBypassStatic(r)
+	useHTMLCache := !isStatic && host.EdgeCacheEnabled && !cache.ShouldBypassHTML(r)
+	useEdgeCache := rt.edgeCache != nil && (isStatic || useHTMLCache)
 	var cacheKey string
 	if useEdgeCache {
-		cacheKey = cache.CacheKey(proto, r.Method, host.DomainName, r.URL.Path)
+		cacheKey = cache.CacheKey(proto, r.Method, host.DomainName, fullURI)
 		if ent, ok := rt.edgeCache.Get(cacheKey); ok {
 			for k, vals := range ent.Headers {
 				for _, v := range vals {
@@ -284,16 +299,15 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodHead {
 				_, _ = w.Write(ent.Body)
 			}
-			if !skipCleanLog {
+			if !skipCleanLog && !isStatic {
 				rt.logEvent(clientIP, r.Method, r.URL.Path, ent.StatusCode, false, "", ua, host.DomainName, cfCountry)
 			}
 			return
 		}
 	}
 
-	// Reverse Proxy to Upstream
-	targetURL, err := url.Parse(host.TargetUpstream)
-	if err != nil || targetURL.Host == "" {
+	targetURL := ch.targetURL
+	if targetURL == nil {
 		http.Error(w, "Invalid upstream configuration", http.StatusBadGateway)
 		return
 	}
@@ -317,19 +331,22 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if dec.Mode != "bypass" {
 				setSecurityHeaders(resp.Header)
 			}
-			if useEdgeCache && resp.StatusCode == http.StatusOK && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html") {
-				body, readErr := io.ReadAll(io.LimitReader(resp.Body, cache.MaxEntryBytes+1))
-				_ = resp.Body.Close()
-				if readErr == nil && len(body) <= cache.MaxEntryBytes {
-					rt.edgeCache.Set(cacheKey, resp.StatusCode, resp.Header, body)
-					resp.Header.Set("X-Athena-Cache", "MISS")
-					resp.Body = io.NopCloser(bytes.NewReader(body))
-					resp.ContentLength = int64(len(body))
-				} else {
-					resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+			if useEdgeCache && resp.StatusCode == http.StatusOK {
+				canCache := isStatic || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html")
+				if canCache {
+					body, readErr := io.ReadAll(io.LimitReader(resp.Body, cache.MaxEntryBytes+1))
+					_ = resp.Body.Close()
+					if readErr == nil && len(body) <= cache.MaxEntryBytes {
+						rt.edgeCache.Set(cacheKey, resp.StatusCode, resp.Header, body, isStatic)
+						resp.Header.Set("X-Athena-Cache", "MISS")
+						resp.Body = io.NopCloser(bytes.NewReader(body))
+						resp.ContentLength = int64(len(body))
+					} else {
+						resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+					}
 				}
 			}
-			if !skipCleanLog {
+			if !skipCleanLog && !isStatic {
 				rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "", ua, host.DomainName, cfCountry)
 			}
 			return nil

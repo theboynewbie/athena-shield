@@ -6,51 +6,150 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
-const DeepNormalizeMaxChars = 2 * 1024 * 1024
+const DeepNormalizeMaxChars = 512 * 1024 // 512KB cap for deep judol normalization
 
-var (
-	invisibleCharsRe    = regexp.MustCompile("[\u00ad\u034f\u061c\u115f\u1160\u17b4\u17b5\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u206a-\u206f\u3164\ufe00-\ufe0f\ufeff\uffa0]")
-	jsonUnicodeEscapeRe = regexp.MustCompile(`\\u([0-9a-fA-F]{4})`)
-	htmlTagRe           = regexp.MustCompile(`(?s)<!--.*?-->|</?[a-zA-Z][^<>]{0,200}>`)
-	separatorRe         = regexp.MustCompile(`[^\w\s]+|_+`)
-	whitespaceRe        = regexp.MustCompile(`\s+`)
+var jsonUnicodeEscapeRe = regexp.MustCompile(`\\u([0-9a-fA-F]{4})`)
 
-	homoglyphReplacer = strings.NewReplacer(
-		"а", "a", "А", "a", "в", "b", "В", "b", "с", "c", "С", "c", "ԁ", "d", "е", "e", "Е", "e", "ё", "e",
-		"һ", "h", "Н", "h", "і", "i", "І", "i", "ӏ", "i", "ј", "j", "Ј", "j", "к", "k", "К", "k", "м", "m",
-		"М", "m", "п", "n", "о", "o", "О", "o", "р", "p", "Р", "p", "ԛ", "q", "г", "r", "ѕ", "s", "Ѕ", "s",
-		"т", "t", "Т", "t", "у", "y", "У", "y", "х", "x", "Х", "x", "ԝ", "w", "ѡ", "w", "ү", "y", "ʏ", "y",
-		"α", "a", "Α", "a", "β", "b", "Β", "b", "ε", "e", "Ε", "e", "η", "n", "Η", "h", "ι", "i", "Ι", "i",
-		"κ", "k", "Κ", "k", "μ", "u", "Μ", "m", "ν", "v", "Ν", "n", "ο", "o", "Ο", "o", "ρ", "p", "Ρ", "p",
-		"τ", "t", "Τ", "t", "υ", "u", "Υ", "y", "χ", "x", "Χ", "x", "ω", "w", "Ζ", "z", "ց", "g", "օ", "o",
-		"ı", "i", "ɡ", "g", "ɑ", "a", "ʟ", "l", "ꜱ", "s", "ᴏ", "o", "ᴛ", "t",
-	)
+func isInvisibleRune(r rune) bool {
+	switch {
+	case r == 0x00ad || r == 0x034f || r == 0x061c || r == 0x115f || r == 0x1160 || r == 0x17b4 || r == 0x17b5 || r == 0x180e || r == 0x3164 || r == 0xfeff || r == 0xffa0:
+		return true
+	case r >= 0x200b && r <= 0x200f:
+		return true
+	case r >= 0x202a && r <= 0x202e:
+		return true
+	case r >= 0x2060 && r <= 0x2064:
+		return true
+	case r >= 0x206a && r <= 0x206f:
+		return true
+	case r >= 0xfe00 && r <= 0xfe0f:
+		return true
+	}
+	return false
+}
 
-	leetReplacer = strings.NewReplacer(
-		"0", "o", "1", "i", "3", "e", "4", "a", "5", "s", "8", "b", "@", "a", "$", "s",
-	)
-)
+func mapHomoglyph(r rune) rune {
+	switch r {
+	case 'а', 'А', 'α', 'Α', 'ɑ':
+		return 'a'
+	case 'в', 'В', 'β', 'Β':
+		return 'b'
+	case 'с', 'С':
+		return 'c'
+	case 'ԁ':
+		return 'd'
+	case 'е', 'Е', 'ё', 'ε', 'Ε':
+		return 'e'
+	case 'ց', 'ɡ':
+		return 'g'
+	case 'һ', 'Н', 'Η':
+		return 'h'
+	case 'і', 'І', 'ӏ', 'ι', 'Ι', 'ı':
+		return 'i'
+	case 'ј', 'Ј':
+		return 'j'
+	case 'к', 'К', 'κ', 'Κ':
+		return 'k'
+	case 'ʟ':
+		return 'l'
+	case 'м', 'М', 'Μ':
+		return 'm'
+	case 'п', 'η', 'Ν':
+		return 'n'
+	case 'о', 'О', 'ο', 'Ο', 'օ', 'ᴏ':
+		return 'o'
+	case 'р', 'Р', 'ρ', 'Ρ':
+		return 'p'
+	case 'ԛ':
+		return 'q'
+	case 'г':
+		return 'r'
+	case 'ѕ', 'Ѕ', 'ꜱ':
+		return 's'
+	case 'т', 'Т', 'τ', 'Τ', 'ᴛ':
+		return 't'
+	case 'μ', 'υ':
+		return 'u'
+	case 'ν':
+		return 'v'
+	case 'ԝ', 'ѡ', 'ω':
+		return 'w'
+	case 'х', 'Х', 'χ', 'Χ':
+		return 'x'
+	case 'у', 'У', 'ү', 'ʏ', 'Υ':
+		return 'y'
+	case 'Ζ':
+		return 'z'
+	}
+	return r
+}
+
+func mapLeet(r rune) rune {
+	switch r {
+	case '0':
+		return 'o'
+	case '1':
+		return 'i'
+	case '3':
+		return 'e'
+	case '4', '@':
+		return 'a'
+	case '5', '$':
+		return 's'
+	case '8':
+		return 'b'
+	}
+	return r
+}
+
+func stripHTMLTagsFast(s string) string {
+	if !strings.Contains(s, "<") {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	inTag := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '<' {
+			inTag = true
+			continue
+		}
+		if ch == '>' && inTag {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			b.WriteByte(ch)
+		}
+	}
+	return b.String()
+}
 
 func urlDecodeLayers(rawText string) []string {
+	if !strings.Contains(rawText, "%") && !strings.Contains(rawText, "+") {
+		return nil
+	}
 	var variants []string
 	curr := rawText
 	for i := 0; i < 3; i++ {
 		decoded, err := url.QueryUnescape(curr)
-		if err != nil {
-			// Fallback: replace valid %XX sequences leniently or stop
-			break
-		}
-		if decoded == curr {
+		if err != nil || decoded == curr {
 			break
 		}
 		variants = append(variants, decoded)
 		curr = decoded
+		if !strings.Contains(curr, "%") && !strings.Contains(curr, "+") {
+			break
+		}
 	}
 	return variants
 }
 
+// deepJudolNormalize performs a single-pass non-regex normalization for gambling keywords.
 func deepJudolNormalize(text string) []string {
 	t := text
 	if strings.Contains(t, `\u`) {
@@ -68,47 +167,92 @@ func deepJudolNormalize(text string) []string {
 	if strings.Contains(t, "&") {
 		t = html.UnescapeString(html.UnescapeString(t))
 	}
-	t = invisibleCharsRe.ReplaceAllString(t, "")
 	if strings.Contains(t, "<") {
-		t = htmlTagRe.ReplaceAllString(t, "")
+		t = stripHTMLTagsFast(t)
 	}
-	t = strings.ToLower(homoglyphReplacer.Replace(t))
 
-	out := []string{t}
-	collapsed := whitespaceRe.ReplaceAllString(separatorRe.ReplaceAllString(t, " "), " ")
-	if collapsed != t {
-		out = append(out, collapsed)
+	var normBuf strings.Builder
+	var collapsedBuf strings.Builder
+	normBuf.Grow(len(t))
+	collapsedBuf.Grow(len(t))
+
+	prevSpace := false
+	for _, r := range t {
+		if isInvisibleRune(r) {
+			continue
+		}
+		r = unicode.ToLower(mapHomoglyph(r))
+		normBuf.WriteRune(r)
+
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			collapsedBuf.WriteRune(r)
+			prevSpace = false
+		} else if !prevSpace {
+			collapsedBuf.WriteByte(' ')
+			prevSpace = true
+		}
 	}
-	return out
+
+	normStr := normBuf.String()
+	colStr := strings.TrimSpace(collapsedBuf.String())
+	if colStr != "" && colStr != normStr {
+		return []string{normStr, colStr}
+	}
+	return []string{normStr}
+}
+
+func applyLeetFast(s string) (string, bool) {
+	hasLeet := false
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '0', '1', '3', '4', '5', '8', '@', '$':
+			hasLeet = true
+		}
+		if hasLeet {
+			break
+		}
+	}
+	if !hasLeet {
+		return s, false
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		b.WriteRune(mapLeet(r))
+	}
+	return b.String(), true
 }
 
 func NormalizeTextPayload(rawText string, includeLeetspeak bool) []string {
 	if rawText == "" {
 		return nil
 	}
-	variants := []string{rawText}
-	variants = append(variants, urlDecodeLayers(rawText)...)
+	variants := make([]string, 0, 6)
+	variants = append(variants, rawText)
+	if dec := urlDecodeLayers(rawText); len(dec) > 0 {
+		variants = append(variants, dec...)
+	}
 
 	if includeLeetspeak {
-		var deep []string
-		for _, item := range variants {
+		baseCount := len(variants)
+		for i := 0; i < baseCount; i++ {
+			item := variants[i]
 			if len(item) > DeepNormalizeMaxChars {
 				item = item[:DeepNormalizeMaxChars]
 			}
-			deep = append(deep, deepJudolNormalize(item)...)
+			variants = append(variants, deepJudolNormalize(item)...)
 		}
-		variants = append(variants, deep...)
-
-		snapshot := make([]string, len(variants))
-		copy(snapshot, variants)
-		for _, item := range snapshot {
-			translated := leetReplacer.Replace(item)
-			if translated != item {
-				variants = append(variants, translated)
+		curCount := len(variants)
+		for i := 0; i < curCount; i++ {
+			if leet, changed := applyLeetFast(variants[i]); changed {
+				variants = append(variants, leet)
 			}
 		}
 	}
 
+	if len(variants) <= 1 {
+		return variants
+	}
 	seen := make(map[string]struct{}, len(variants))
 	unique := make([]string, 0, len(variants))
 	for _, v := range variants {

@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 type SystemMetrics struct {
@@ -60,7 +59,6 @@ func readLinuxCPU() float64 {
 		prevIdle = idle
 		prevTotal = total
 		hasPrevCPU = true
-		time.Sleep(50 * time.Millisecond)
 		return 0
 	}
 	dt := total - prevTotal
