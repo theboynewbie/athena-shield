@@ -22,4 +22,7 @@ ENV DATA_DIR=/data \
 VOLUME ["/data"]
 EXPOSE 80 443 1081
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q -O /dev/null http://127.0.0.1:${HTTP_PORT:-80}/healthz || exit 1
+
 ENTRYPOINT ["/app/athena-shield"]

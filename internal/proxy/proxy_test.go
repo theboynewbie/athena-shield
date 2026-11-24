@@ -111,4 +111,34 @@ func TestProxyForwardRedirectBlockAndCache(t *testing.T) {
 	if recRed.Code != http.StatusMovedPermanently || recRed.Header().Get("Location") != "https://new.local/berita?id=5" {
 		t.Fatalf("expected 301 to https://new.local/berita?id=5, got %d -> %q", recRed.Code, recRed.Header().Get("Location"))
 	}
+
+	// 5. Wildcard domain (*.kampus.local) + /healthz
+	if err := s.CreateProxyHost(&store.ProxyHost{
+		DomainName:     "*.kampus.local",
+		TargetUpstream: upstream.URL,
+		HostType:       "proxy",
+		SSLType:        "none",
+		WAFEnabled:     true,
+		WAFMode:        "active",
+		IsActive:       true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rt.Reload()
+
+	reqWc := httptest.NewRequest("GET", "http://ft.kampus.local/profil", nil)
+	reqWc.Host = "ft.kampus.local"
+	reqWc.RemoteAddr = "203.0.113.10:1234"
+	recWc := httptest.NewRecorder()
+	rt.ServeHTTP(recWc, reqWc)
+	if recWc.Code != http.StatusOK || recWc.Header().Get("Server") != "Athena-Shield" {
+		t.Fatalf("expected wildcard 200 with Server=Athena-Shield, got %d %q", recWc.Code, recWc.Header().Get("Server"))
+	}
+
+	reqHealth := httptest.NewRequest("GET", "http://127.0.0.1/healthz", nil)
+	recHealth := httptest.NewRecorder()
+	rt.ServeHTTP(recHealth, reqHealth)
+	if recHealth.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /healthz, got %d", recHealth.Code)
+	}
 }

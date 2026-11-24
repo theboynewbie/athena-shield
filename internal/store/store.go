@@ -32,7 +32,7 @@ func Open(dataDir, adminUser, adminEmail, adminPass string) (*Store, error) {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 	dbPath := filepath.Join(dataDir, "athena_shield.db")
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)", dbPath)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(15000)&_pragma=cache_size(-32000)&_pragma=temp_store(MEMORY)&_pragma=foreign_keys(ON)&_txlock=immediate", dbPath)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -251,9 +251,9 @@ func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
 			},
 			{
 				name: "Universal RCE, Log4Shell & Framework Exploit Shield",
-				desc: "Virtual patching lintas aplikasi (SLiMS, OJS, Laravel, Node, PHP): Log4Shell JNDI, Laravel Ignition RCE, PHPUnit RCE, & backdoor shell",
+				desc: "Virtual patching lintas aplikasi (SLiMS, OJS, Laravel, Node, PHP): Log4Shell JNDI, Laravel Ignition RCE, PHPUnit RCE, SSRF Metadata, XXE, NoSQLi & backdoor shell",
 				cat:  "custom",
-				pat:  `(\$\{jndi:(?:ldap|ldaps|rmi|dns|nis|iiop|corba|nds)://|/_ignition/execute-solution|/vendor/phpunit/|allow_url_include\s*=|auto_prepend_file\s*=|b374k|indoxploit|alfa_shell)`,
+				pat:  `(\$\{jndi:(?:ldap|ldaps|rmi|dns|nis|iiop|corba|nds)://|/_ignition/execute-solution|/vendor/phpunit/|allow_url_include\s*=|auto_prepend_file\s*=|b374k|indoxploit|alfa_shell|169\.254\.169\.254|metadata\.google\.internal|(?:gopher|dict|file)://|<!ENTITY\s+\w+\s+SYSTEM\b|\$(?:where|ne|gt|lt|regex)\b\s*:)`,
 			},
 		}
 		for _, r := range defaultRules {

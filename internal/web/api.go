@@ -16,7 +16,7 @@ import (
 )
 
 var (
-	domainRe          = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+	domainRe          = regexp.MustCompile(`^(\*\.)?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 	forbiddenConfChar = regexp.MustCompile(`[\s;{}'"\\$` + "`" + `\r\n\x00]`)
 	validAppProfiles  = map[string]bool{"universal": true, "wordpress": true, "slims": true, "laravel_api": true}
 	validWAFModes     = map[string]bool{"active": true, "monitor": true, "bypass": true}

@@ -140,11 +140,28 @@ func (rt *Router) matchCompiledHost(r *http.Request) (compiledHost, bool) {
 	if mPtr == nil {
 		return compiledHost{}, false
 	}
-	h, ok := (*mPtr)[clean]
-	return h, ok
+	m := *mPtr
+	if h, ok := m[clean]; ok {
+		return h, true
+	}
+	// Wildcard domain fallback (e.g. *.kampus.ac.id)
+	if wc := wildcardParent(clean); wc != "" {
+		if h, ok := m[wc]; ok {
+			// Override DomainName with actual requested subdomain so Host header & logs preserve the real subdomain
+			h.DomainName = clean
+			return h, true
+		}
+	}
+	return compiledHost{}, false
 }
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/healthz" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","engine":"Athena Shield"}`))
+		return
+	}
 	ch, found := rt.matchCompiledHost(r)
 	if !found {
 		http.Error(w, "Athena Shield: Domain not configured", http.StatusNotFound)
@@ -312,6 +329,14 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	isHTTPS := r.TLS != nil || strings.EqualFold(proto, "https") || host.SSLType != "none"
+	fwdProto := "http"
+	fwdPort := "80"
+	if isHTTPS {
+		fwdProto = "https"
+		fwdPort = "443"
+	}
+
 	rp := &httputil.ReverseProxy{
 		Transport:     rt.transport,
 		FlushInterval: 100 * time.Millisecond,
@@ -322,9 +347,11 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Set("X-Forwarded-Host", host.DomainName)
 			pr.Out.Header.Set("X-Forwarded-For", clientIP)
 			pr.Out.Header.Set("X-Real-IP", clientIP)
-			pr.Out.Header.Set("X-Forwarded-Proto", "https")
-			pr.Out.Header.Set("X-Forwarded-SSL", "on")
-			pr.Out.Header.Set("X-Forwarded-Port", "443")
+			pr.Out.Header.Set("X-Forwarded-Proto", fwdProto)
+			pr.Out.Header.Set("X-Forwarded-Port", fwdPort)
+			if isHTTPS {
+				pr.Out.Header.Set("X-Forwarded-SSL", "on")
+			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Alt-Svc")
@@ -399,6 +426,12 @@ func (rt *Router) logEvent(clientIP, method, uri string, statusCode int, isBlock
 }
 
 func setSecurityHeaders(h http.Header) {
+	// Strip backend version fingerprinting headers
+	h.Del("X-Powered-By")
+	h.Del("X-AspNet-Version")
+	h.Del("X-AspNetMvc-Version")
+	h.Del("X-Runtime")
+	h.Set("Server", "Athena-Shield")
 	h.Set("X-Protected-By", "Athena-Shield-v1.5")
 	h.Set("X-Frame-Options", "SAMEORIGIN")
 	h.Set("X-Content-Type-Options", "nosniff")

@@ -31,6 +31,7 @@ var (
 	wpUsersRestRe       = regexp.MustCompile(`(?i)/wp-json/wp/v2/users/?(\?|$|\d+)`)
 	wpUsersQueryRe      = regexp.MustCompile(`(?i)rest_route=/wp/v2/users/?(&|$|\d+)`)
 	sqlDumpRe           = regexp.MustCompile(`(?i)/(?:backup|dump|database|db_backup|slims|wordpress)\.sql(?:\.gz|\.zip|\.bak)?$`)
+	ssrfOrXXERe         = regexp.MustCompile(`(?i)(169\.254\.169\.254|metadata\.google\.internal|(?:gopher|dict)://|<!ENTITY\s+[%\w]+\s+SYSTEM\b)`)
 	boundaryRe          = regexp.MustCompile(`(?i)boundary=([^\s;]+)`)
 	filenameHeaderRe    = regexp.MustCompile(`(?i)filename\*?=["']?([^"';\r\n]+)`)
 	multiSpaceRe        = regexp.MustCompile(`\s+`)
@@ -261,6 +262,16 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 		return Decision{Blocked: false, Mode: "bypass"}
 	}
 
+	// 0. HTTP Request Smuggling Guard (CL.TE / TE.CL conflict)
+	if len(r.Header.Values("Transfer-Encoding")) > 0 && r.Header.Get("Content-Length") != "" {
+		return Decision{
+			Blocked:  true,
+			Reason:   "Protocol Hardening: HTTP Request Smuggling (Conflicting Content-Length & Transfer-Encoding) blocked",
+			Category: "Protocol Hardening",
+			Mode:     wafMode,
+		}
+	}
+
 	clientIP := geoip.GetClientIP(r)
 	snap := e.snap.Load()
 	if snap == nil {
@@ -436,6 +447,14 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 	}
 
 	bodyText := extractInspectableBodyText(contentType, bodyBytes, e.cfg.MaxInspectBodyBytes)
+	if ssrfOrXXERe.MatchString(queryLower) || ssrfOrXXERe.MatchString(bodyText) {
+		return Decision{
+			Blocked:  true,
+			Reason:   "App Hardening: Cloud Metadata SSRF / XXE External Entity injection blocked",
+			Category: "App Hardening",
+			Mode:     wafMode,
+		}
+	}
 	isAdminCode := isAdminCodeEditorRequest(r, bodyText) && e.verifyWPAdminSession(r, host)
 
 	var hdrBuilder strings.Builder

@@ -126,6 +126,10 @@ func (sv *Server) registerRoutes() {
 	staticSub, _ := fs.Sub(webassets.FS, "static")
 	sv.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
 
+	sv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "engine": "Athena Shield"})
+	})
+
 	sv.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	})

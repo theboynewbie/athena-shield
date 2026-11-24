@@ -68,6 +68,8 @@ func TestDetectionsAndNormalization(t *testing.T) {
 		{"WP Admin Mine tab exempt", "GET", "http://kampus.ac.id/wp-admin/edit.php?post_type=post&author=1", "", "", false},
 		{"Public author enum blocked", "GET", "http://kampus.ac.id/?author=1", "", "", true},
 		{"OPAC author search exempt", "GET", "http://kampus.ac.id/?keywords=buku&author=1", "", "", false},
+		{"Cloud metadata SSRF blocked", "GET", "http://kampus.ac.id/?url=http://169.254.169.254/latest/meta-data/", "", "", true},
+		{"XXE external entity blocked", "POST", "http://kampus.ac.id/api/xml", "", "<!DOCTYPE foo [<!ENTITY xxe SYSTEM 'file:///etc/passwd'>]>", true},
 	}
 
 	for _, tc := range cases {

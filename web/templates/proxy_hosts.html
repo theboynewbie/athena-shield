@@ -14,11 +14,18 @@
                 Configure external domains, upstream backends, SSL certificates, and WAF profiles
             </p>
         </div>
-        <button @click="openModal()"
-            class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors">
-            <i class="fa-solid fa-plus text-[11px]"></i>
-            <span>New Proxy Host</span>
-        </button>
+        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+            <div class="relative flex-1 sm:w-64">
+                <input type="text" x-model="searchQuery" placeholder="Cari domain atau IP backend..."
+                    class="w-full pl-8 pr-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-zinc-400 text-xs"></i>
+            </div>
+            <button @click="openModal()"
+                class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors shrink-0">
+                <i class="fa-solid fa-plus text-[11px]"></i>
+                <span>New Proxy Host</span>
+            </button>
+        </div>
     </div>
 
     <!-- Proxy Hosts Table -->
@@ -36,7 +43,7 @@
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
-                    <template x-for="host in hosts" :key="host.id">
+                    <template x-for="host in filteredHosts()" :key="host.id">
                         <tr class="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors">
                             <td class="px-5 py-3.5">
                                 <span x-text="host.domain_name" class="font-medium text-zinc-900 dark:text-white text-sm block"></span>
@@ -358,7 +365,17 @@
 function proxyApp() {
     return {
         hosts: [],
+        searchQuery: '',
         showModal: false,
+        filteredHosts() {
+            const q = (this.searchQuery || '').trim().toLowerCase();
+            if (!q) return this.hosts;
+            return this.hosts.filter(h =>
+                (h.domain_name || '').toLowerCase().includes(q) ||
+                (h.target_upstream || '').toLowerCase().includes(q) ||
+                (h.redirect_url || '').toLowerCase().includes(q)
+            );
+        },
         isEdit: false,
         certFileName: '',
         keyFileName: '',
