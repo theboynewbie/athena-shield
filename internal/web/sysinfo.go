@@ -64,6 +64,10 @@ func formatNICSpeed(mbps int) string {
 }
 
 func getCachedNICInfo() (name, speedLabel string, speedMbps int) {
+	if envSpeed := strings.TrimSpace(os.Getenv("HOST_NIC_SPEED")); envSpeed != "" {
+		return "host", envSpeed, 0
+	}
+
 	nicMu.Lock()
 	if !nicCachedAt.IsZero() && time.Since(nicCachedAt) < 60*time.Second {
 		n, s, m := cachedNIC, cachedSpeed, cachedMbps
@@ -91,7 +95,7 @@ func isVirtualNICName(name string) bool {
 	if name == "lo" {
 		return true
 	}
-	for _, prefix := range []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "tailscale", "wg", "tun", "tap", "kube"} {
+	for _, prefix := range []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "tailscale", "wg", "tun", "tap", "kube", "wl"} {
 		if strings.HasPrefix(name, prefix) {
 			return true
 		}
@@ -99,31 +103,45 @@ func isVirtualNICName(name string) bool {
 	return false
 }
 
-func readLinuxNIC() (string, string, int) {
-	entries, err := os.ReadDir("/sys/class/net")
+func scanSysClassNet(netDir string) (physName, physSpeedLabel string, physMbps int, fallbackUp string) {
+	entries, err := os.ReadDir(netDir)
 	if err != nil {
-		return "", "Auto", 0
+		return "", "", 0, ""
 	}
-
-	var bestPhysName, bestAnyName, fallbackUpName string
-	var bestPhysSpeed, bestAnySpeed int
 
 	for _, ent := range entries {
 		name := ent.Name()
 		if isVirtualNICName(name) {
 			continue
 		}
-		base := filepath.Join("/sys/class/net", name)
+		base := filepath.Join(netDir, name)
 		opBytes, err := os.ReadFile(filepath.Join(base, "operstate"))
 		if err != nil || strings.TrimSpace(string(opBytes)) != "up" {
 			continue
 		}
-		if fallbackUpName == "" {
-			fallbackUpName = name
+		if fallbackUp == "" {
+			fallbackUp = name
 		}
 
-		_, devErr := os.Stat(filepath.Join(base, "device"))
-		isPhys := devErr == nil
+		// Must be backed by a real hardware/PCI/virtio device
+		if _, devErr := os.Stat(filepath.Join(base, "device")); devErr != nil {
+			continue
+		}
+
+		// Exclude veth pairs (where iflink != ifindex)
+		ifIdx, err1 := os.ReadFile(filepath.Join(base, "ifindex"))
+		ifLnk, err2 := os.ReadFile(filepath.Join(base, "iflink"))
+		if err1 == nil && err2 == nil && strings.TrimSpace(string(ifIdx)) != strings.TrimSpace(string(ifLnk)) {
+			continue
+		}
+
+		// Exclude explicit virtual DEVTYPE in uevent
+		if uev, err := os.ReadFile(filepath.Join(base, "uevent")); err == nil {
+			uevStr := string(uev)
+			if strings.Contains(uevStr, "DEVTYPE=veth") || strings.Contains(uevStr, "DEVTYPE=bridge") {
+				continue
+			}
+		}
 
 		spBytes, spErr := os.ReadFile(filepath.Join(base, "speed"))
 		if spErr != nil {
@@ -133,24 +151,25 @@ func readLinuxNIC() (string, string, int) {
 		if err != nil || mbps <= 0 {
 			continue
 		}
-		if isPhys && mbps > bestPhysSpeed {
-			bestPhysSpeed = mbps
-			bestPhysName = name
-		}
-		if mbps > bestAnySpeed {
-			bestAnySpeed = mbps
-			bestAnyName = name
+		if mbps > physMbps {
+			physMbps = mbps
+			physName = name
+			physSpeedLabel = formatNICSpeed(mbps)
 		}
 	}
+	return physName, physSpeedLabel, physMbps, fallbackUp
+}
 
-	if bestPhysName != "" {
-		return bestPhysName, formatNICSpeed(bestPhysSpeed), bestPhysSpeed
+func readLinuxNIC() (string, string, int) {
+	if name, label, mbps, _ := scanSysClassNet("/host/sys/class/net"); name != "" {
+		return name, label, mbps
 	}
-	if bestAnyName != "" {
-		return bestAnyName, formatNICSpeed(bestAnySpeed), bestAnySpeed
+	name, label, mbps, fallbackUp := scanSysClassNet("/sys/class/net")
+	if name != "" {
+		return name, label, mbps
 	}
-	if fallbackUpName != "" {
-		return fallbackUpName, "Virtual NIC", 0
+	if fallbackUp != "" {
+		return fallbackUp, "Virtual NIC", 0
 	}
 	return "", "Auto", 0
 }
