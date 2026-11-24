@@ -1,0 +1,408 @@
+{{template "base" .}}
+{{define "title"}}Audit Logs — Athena Shield{{end}}
+
+{{define "content"}}
+<div x-data="logsApp()" x-init="init()" class="space-y-6">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+            <div class="flex items-center gap-2.5">
+                <h1 class="text-xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white">Audit & Attack Logs</h1>
+                <span class="text-xs text-zinc-400 tabular-nums" x-text="'(' + total.toLocaleString('id-ID') + ')'"></span>
+            </div>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Real-time audit trail of inbound reverse proxy requests</p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+            <button @click="loadLogs()"
+                class="px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 transition-colors">
+                <i class="fa-solid fa-arrows-rotate text-[11px] text-zinc-400" :class="loading ? 'animate-spin' : ''"></i>
+                <span>Refresh</span>
+            </button>
+            <button @click="openUnbanModal()"
+                class="px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 transition-colors">
+                <i class="fa-solid fa-unlock-keyhole text-[11px] text-amber-500"></i>
+                <span>Unban IP</span>
+            </button>
+            {{if eq .User.Role "super_admin"}}
+            <button @click="clearLogs()"
+                class="px-3 py-1.5 bg-white dark:bg-zinc-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-medium rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center gap-1.5 transition-colors">
+                <i class="fa-solid fa-trash-can text-[11px]"></i>
+                <span>Bersihkan Log</span>
+            </button>
+            {{end}}
+        </div>
+    </div>
+
+    <!-- Filter Controls -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 dasher-card p-4 rounded-xl">
+        <div>
+            <label class="block text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mb-1">Cari IP / Domain / URI</label>
+            <input type="text" x-model="search" @input.debounce.500ms="loadLogs(1)" placeholder="Domain, IP, atau /wp-admin..."
+                class="w-full px-3 py-1.5 border rounded-lg text-xs focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+        </div>
+
+        <div>
+            <label class="block text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mb-1">Target Website</label>
+            <select x-model="filterHost" @change="loadLogs(1)" class="w-full px-3 py-1.5 border rounded-lg text-xs">
+                <option value="">Semua Website</option>
+                <template x-for="h in availableHosts" :key="h">
+                    <option :value="h" x-text="h"></option>
+                </template>
+            </select>
+        </div>
+
+        <div>
+            <label class="block text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mb-1">Status</label>
+            <select x-model="filterStatus" @change="loadLogs(1)" class="w-full px-3 py-1.5 border rounded-lg text-xs">
+                <option value="">Semua Traffic</option>
+                <option value="true">Serangan (Blocked / 429 / 403)</option>
+                <option value="false">Traffic Bersih (Forwarded)</option>
+            </select>
+        </div>
+
+        <div>
+            <div class="flex items-center justify-between mb-1">
+                <label class="block text-[11px] text-zinc-500 dark:text-zinc-400 font-medium">Tanggal</label>
+                <template x-if="filterDate || customDate">
+                    <button @click="resetDateFilter()" class="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white">Reset</button>
+                </template>
+            </div>
+            <div class="space-y-1.5">
+                <select x-model="filterDate" @change="onDatePresetChange()" class="w-full px-3 py-1.5 border rounded-lg text-xs">
+                    <option value="">Semua Tanggal</option>
+                    <option value="today">Hari Ini</option>
+                    <option value="yesterday">Kemarin</option>
+                    <option value="7days">7 Hari Terakhir</option>
+                    <option value="30days">30 Hari Terakhir</option>
+                    <option value="custom">Pilih Tanggal</option>
+                </select>
+                <div x-show="filterDate === 'custom'" x-cloak>
+                    <input type="date" x-model="customDate" @change="loadLogs(1)" class="w-full px-3 py-1.5 border rounded-lg text-xs">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="dasher-card rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="text-zinc-500 dark:text-zinc-400 bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 font-medium text-[11px]">
+                    <tr>
+                        <th class="px-4 py-3 font-medium">Timestamp</th>
+                        <th class="px-4 py-3 font-medium">Website</th>
+                        <th class="px-4 py-3 font-medium">Client IP</th>
+                        <th class="px-4 py-3 font-medium">Method & URI</th>
+                        <th class="px-4 py-3 font-medium">Status</th>
+                        <th class="px-4 py-3 font-medium">Decision</th>
+                        <th class="px-4 py-3 font-medium">User-Agent</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                    <template x-for="log in logs" :key="log.id">
+                        <tr class="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors">
+                            <td class="px-4 py-3 text-zinc-500 dark:text-zinc-400 tabular-nums whitespace-nowrap" x-text="formatDate(log.timestamp)"></td>
+                            <td class="px-4 py-3 whitespace-nowrap">
+                                <template x-if="log.host">
+                                    <a :href="getTargetSiteUrl(log.host)" target="_blank" rel="noopener noreferrer"
+                                       class="text-zinc-800 dark:text-zinc-200 hover:underline font-medium">
+                                        <span x-text="log.host"></span>
+                                    </a>
+                                </template>
+                                <template x-if="!log.host">
+                                    <span class="text-zinc-400">Direct IP</span>
+                                </template>
+                            </td>
+                            <td class="px-4 py-3 font-medium text-zinc-900 dark:text-white tabular-nums whitespace-nowrap">
+                                <div class="flex items-center gap-1.5">
+                                    <span x-text="log.client_ip"></span>
+                                    <template x-if="log.country_code">
+                                        <span class="text-[11px] text-zinc-400 inline-flex items-center gap-1" :title="log.country || log.country_code">
+                                            <template x-if="log.country_code && log.country_code.length === 2">
+                                                <img :src="'https://flagcdn.com/24x18/' + log.country_code.toLowerCase() + '.png'"
+                                                     class="w-3.5 h-2.5 rounded-[2px] object-cover inline"
+                                                     :alt="log.country_code"
+                                                     loading="lazy"
+                                                     @error="$el.style.display='none'">
+                                            </template>
+                                            <template x-if="!log.country_code || log.country_code.length !== 2">
+                                                <span x-text="getFlagEmoji(log.country_code)"></span>
+                                            </template>
+                                        </span>
+                                    </template>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 max-w-sm">
+                                <div class="flex items-baseline gap-2">
+                                    <span class="text-[11px] font-semibold text-zinc-500 dark:text-zinc-400 shrink-0" x-text="log.method"></span>
+                                    <a :href="getFullUrl(log)" target="_blank" rel="noopener noreferrer"
+                                       class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:underline break-all">
+                                        <span x-text="log.uri"></span>
+                                    </a>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 whitespace-nowrap tabular-nums">
+                                <span class="inline-flex items-center gap-1.5 font-medium"
+                                    :class="log.is_blocked ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="log.is_blocked ? 'bg-rose-500' : 'bg-emerald-500'"></span>
+                                    <span x-text="log.status_code"></span>
+                                </span>
+                            </td>
+                            <td class="px-4 py-3">
+                                <template x-if="log.is_blocked">
+                                    <span class="text-rose-600 dark:text-rose-400 flex items-center gap-1.5 flex-wrap">
+                                        <span x-text="log.reason || 'Blocked'"></span>
+                                        <template x-if="log.reason && (log.reason.includes('Auto-Banned') || log.reason.includes('blacklisted'))">
+                                            <button @click="unbanIp(log.client_ip)" class="px-2 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[10px] font-medium">
+                                                Unban
+                                            </button>
+                                        </template>
+                                    </span>
+                                </template>
+                                <template x-if="!log.is_blocked && log.reason && log.reason.startsWith('[MONITOR]')">
+                                    <span class="text-amber-600 dark:text-amber-400" x-text="log.reason"></span>
+                                </template>
+                                <template x-if="!log.is_blocked && (!log.reason || !log.reason.startsWith('[MONITOR]'))">
+                                    <span :class="log.status_code >= 500 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-500 dark:text-zinc-400'" x-text="log.reason || 'Forwarded'"></span>
+                                </template>
+                            </td>
+                            <td class="px-4 py-3 text-zinc-400 max-w-xs truncate text-[11px]" :title="log.user_agent" x-text="log.user_agent || '-'"></td>
+                        </tr>
+                    </template>
+                    <tr x-show="logs.length === 0">
+                        <td colspan="7" class="px-6 py-12 text-center text-zinc-400">
+                            Tidak ada log aktivitas ditemukan.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+        <div class="flex items-center gap-2.5 tabular-nums">
+            <span>Menampilkan <strong class="text-zinc-900 dark:text-white font-medium" x-text="logs.length"></strong> dari <strong class="text-zinc-900 dark:text-white font-medium" x-text="total.toLocaleString('id-ID')"></strong></span>
+            <span>&middot;</span>
+            <select x-model="limit" @change="loadLogs(1)" class="px-2 py-1 border rounded-md text-xs">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="250">250</option>
+            </select>
+        </div>
+
+        <div class="flex items-center gap-1.5 tabular-nums">
+            <button @click="loadLogs(1)" :disabled="page <= 1"
+                class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 disabled:opacity-40">
+                <i class="fa-solid fa-angles-left text-[10px]"></i>
+            </button>
+            <button @click="loadLogs(page - 1)" :disabled="page <= 1"
+                class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 disabled:opacity-40">
+                Prev
+            </button>
+            <span class="px-3 py-1.5 text-zinc-700 dark:text-zinc-300 font-medium">
+                <span x-text="page"></span> / <span x-text="totalPages"></span>
+            </span>
+            <button @click="loadLogs(page + 1)" :disabled="page >= totalPages"
+                class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 disabled:opacity-40">
+                Next
+            </button>
+            <button @click="loadLogs(totalPages)" :disabled="page >= totalPages"
+                class="px-2.5 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 disabled:opacity-40">
+                <i class="fa-solid fa-angles-right text-[10px]"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal: Unban IP -->
+    <div x-show="showUnbanModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div @click.away="showUnbanModal = false" class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-lg w-full p-6 shadow-xl relative">
+            <div class="flex items-center justify-between pb-3.5 border-b border-zinc-100 dark:border-zinc-800">
+                <div>
+                    <h3 class="text-base font-display font-semibold text-zinc-900 dark:text-white">Kelola & Bebaskan IP</h3>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Bebaskan IP yang terkena Auto-Ban Jail</p>
+                </div>
+                <button @click="showUnbanModal = false" class="text-zinc-400 hover:text-zinc-900 dark:hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <div class="mt-4 space-y-1.5">
+                <label class="block text-xs text-zinc-700 dark:text-zinc-300 font-medium">Unban IP Manual</label>
+                <div class="flex gap-2">
+                    <input type="text" x-model="manualUnbanIp" @keyup.enter="submitManualUnban()" placeholder="Contoh: 103.160.182.7"
+                        class="flex-1 px-3 py-2 border rounded-lg text-xs">
+                    <button @click="submitManualUnban()" class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium text-xs rounded-lg whitespace-nowrap">
+                        Bebaskan
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-5">
+                <div class="flex items-center justify-between mb-2">
+                    <label class="block text-xs text-zinc-700 dark:text-zinc-300 font-medium">Active Jails</label>
+                    <button @click="fetchBannedIps()" class="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white">Refresh</button>
+                </div>
+
+                <div class="bg-zinc-50 dark:bg-zinc-900/60 rounded-lg border border-zinc-200 dark:border-zinc-800 divide-y divide-zinc-200/70 dark:divide-zinc-800 max-h-48 overflow-y-auto">
+                    <template x-if="bannedIpsList.length === 0">
+                        <div class="p-4 text-center text-xs text-zinc-400">Tidak ada IP yang sedang dipenjara.</div>
+                    </template>
+                    <template x-for="b in bannedIpsList" :key="b.ip">
+                        <div class="p-3 flex items-center justify-between text-xs tabular-nums">
+                            <div class="flex items-center gap-2">
+                                <span class="text-zinc-900 dark:text-white font-medium" x-text="b.ip"></span>
+                                <span class="text-[11px] text-zinc-400" x-text="b.type + ' · ' + b.remaining_str"></span>
+                            </div>
+                            <button @click="unbanIp(b.ip)" class="px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[11px] font-medium">
+                                Unban
+                            </button>
+                        </div>
+                    </template>
+                </div>
+            </div>
+
+            <div class="mt-5 pt-3 border-t border-zinc-100 dark:border-zinc-800 flex justify-end">
+                <button @click="showUnbanModal = false" class="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 text-xs font-medium">
+                    Tutup
+                </button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function logsApp() {
+    return {
+        logs: [],
+        total: 0,
+        page: 1,
+        limit: 50,
+        totalPages: 1,
+        loading: false,
+        search: '',
+        filterStatus: '',
+        filterHost: '',
+        filterDate: '',
+        customDate: '',
+        availableHosts: [],
+        showUnbanModal: false,
+        manualUnbanIp: '',
+        bannedIpsList: [],
+
+        async init() { await this.loadLogs(); },
+        onDatePresetChange() {
+            if (this.filterDate !== 'custom') {
+                this.customDate = '';
+                this.loadLogs(1);
+            }
+        },
+        resetDateFilter() {
+            this.filterDate = '';
+            this.customDate = '';
+            this.loadLogs(1);
+        },
+        async openUnbanModal() {
+            this.showUnbanModal = true;
+            await this.fetchBannedIps();
+        },
+        async fetchBannedIps() {
+            try {
+                const res = await fetch('/api/banned-ips');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.bannedIpsList = data.banned_ips || [];
+                }
+            } catch(e) { console.error("Gagal load banned IPs", e); }
+        },
+        async submitManualUnban() {
+            if (!this.manualUnbanIp.trim()) { alert("Silakan masukkan alamat IP"); return; }
+            await this.unbanIp(this.manualUnbanIp.trim());
+            this.manualUnbanIp = '';
+            await this.fetchBannedIps();
+        },
+        async loadLogs(targetPage = null) {
+            if (targetPage !== null) this.page = targetPage;
+            this.loading = true;
+            try {
+                let url = `/api/logs?page=${this.page}&limit=${this.limit}`;
+                if (this.filterStatus) url += `&filter_blocked=${this.filterStatus}`;
+                if (this.filterHost) url += `&filter_host=${encodeURIComponent(this.filterHost)}`;
+                if (this.search) url += `&search=${encodeURIComponent(this.search)}`;
+                if (this.filterDate === 'custom' && this.customDate) {
+                    url += `&filter_date=${encodeURIComponent(this.customDate)}`;
+                } else if (this.filterDate && this.filterDate !== 'custom') {
+                    url += `&filter_date=${encodeURIComponent(this.filterDate)}`;
+                }
+                const res = await fetch(url);
+                if (res.ok) {
+                    const data = await res.json();
+                    this.logs = data.logs;
+                    this.total = data.total;
+                    this.page = data.page || 1;
+                    this.totalPages = data.total_pages || 1;
+                    if (data.available_hosts) this.availableHosts = data.available_hosts;
+                }
+            } catch (err) { console.error("Gagal mengambil log:", err); }
+            finally { this.loading = false; }
+        },
+        getFlagEmoji(cc) {
+            if (!cc || cc === 'LAN' || cc === 'LOCAL') return '🏠';
+            if (cc.length !== 2) return '🌐';
+            try {
+                const codePoints = cc.toUpperCase().split('').map(c => 127397 + c.charCodeAt(0));
+                return String.fromCodePoint(...codePoints);
+            } catch(e) { return '🌐'; }
+        },
+        formatDate(isoStr) {
+            if (!isoStr) return '-';
+            const cleanStr = (isoStr.endsWith('Z') || isoStr.includes('+')) ? isoStr : isoStr + 'Z';
+            return new Date(cleanStr).toLocaleString('id-ID', { hour12: false });
+        },
+        getTargetSiteUrl(host) {
+            if (!host) return '#';
+            const isIp = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host);
+            const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+            return `${(isIp || isLocal) ? 'http://' : 'https://'}${host}`;
+        },
+        getFullUrl(log) {
+            if (!log || !log.uri) return '#';
+            if (log.uri.startsWith('http://') || log.uri.startsWith('https://')) return log.uri;
+            const host = log.host || window.location.hostname;
+            const isIp = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(host);
+            const isLocal = host.includes('localhost') || host.includes('127.0.0.1');
+            const protocol = (isIp || isLocal) ? 'http://' : 'https://';
+            const uri = log.uri.startsWith('/') ? log.uri : '/' + log.uri;
+            return `${protocol}${host}${uri}`;
+        },
+        async clearLogs() {
+            if (!confirm("PERINGATAN: Anda yakin ingin menghapus SEMUA riwayat log WAF?")) return;
+            try {
+                const res = await fetch('/api/logs/clear', { method: 'DELETE' });
+                if (res.ok) await this.loadLogs();
+                else { const data = await res.json(); alert(data.detail || "Gagal menghapus log"); }
+            } catch (err) { alert("Kesalahan jaringan"); }
+        },
+        async unbanIp(ip) {
+            if (!confirm(`Bebaskan IP ${ip} dari hukuman Auto-Ban Jail?`)) return;
+            try {
+                const res = await fetch('/api/unban-ip', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip_address: ip })
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(data.message || `IP ${ip} berhasil di-unban!`);
+                    await this.loadLogs();
+                    await this.fetchBannedIps();
+                } else alert(data.detail || "Gagal unban IP");
+            } catch (err) { alert("Kesalahan jaringan saat unban IP"); }
+        }
+    }
+}
+</script>
+{{end}}

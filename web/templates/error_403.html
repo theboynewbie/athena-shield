@@ -1,0 +1,15 @@
+{{template "base" .}}
+{{define "title"}}403 Forbidden — Athena Shield{{end}}
+
+{{define "content"}}
+<div class="min-h-[70vh] flex flex-col items-center justify-center text-center p-6">
+    <div class="dasher-card rounded-xl p-8 max-w-md w-full">
+        <div class="text-xs font-medium text-rose-600 dark:text-rose-400 mb-2">403 Forbidden</div>
+        <h1 class="text-lg font-display font-semibold text-zinc-900 dark:text-white mb-2">Akses Ditolak</h1>
+        <p class="text-zinc-500 dark:text-zinc-400 text-xs mb-6 leading-relaxed">{{if .Message}}{{.Message}}{{else}}Halaman ini memerlukan hak akses tingkat Super Admin.{{end}}</p>
+        <a href="/dashboard" class="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium transition-colors">
+            &larr; Kembali ke Dashboard
+        </a>
+    </div>
+</div>
+{{end}}

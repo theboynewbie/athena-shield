@@ -1,0 +1,347 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{block "title" .}}Athena Shield — Console{{end}}</title>
+    <link rel="icon" type="image/png" href="/static/logo.png">
+
+    <!-- Theme Init (No FOUC) -->
+    <script>
+        (function() {
+            if (localStorage.getItem('athena_theme') === 'dark') {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        })();
+    </script>
+
+    <!-- Google Fonts: Poppins + San Francisco -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'sans-serif'],
+                        display: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', 'sans-serif'],
+                        mono: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Font Awesome Icons 6.5 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Alpine.js CDN -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <!-- Chart.js (Local Self-Hosted + CDN Fallbacks) -->
+    <script src="/static/js/chart.umd.min.js"></script>
+    <script>
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\/script>');
+        }
+    </script>
+    <script>
+        if (typeof Chart === 'undefined') {
+            document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"><\/script>');
+        }
+    </script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+        html, body, button, input, select, textarea, code, pre {
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', sans-serif;
+        }
+        body {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .dasher-card {
+            background-color: #ffffff;
+            border: 1px solid #e4e4e7;
+        }
+        html.dark .dasher-card {
+            background-color: #111113;
+            border-color: #27272a;
+        }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Minimal Scrollbar */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #d4d4d8; border-radius: 9999px; }
+        html.dark ::-webkit-scrollbar-thumb { background: #3f3f46; }
+
+        /* Crisp Form Controls */
+        input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+        select,
+        textarea {
+            background-color: #ffffff;
+            color: #18181b;
+            border-color: #e4e4e7;
+        }
+        html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
+        html.dark select,
+        html.dark textarea {
+            background-color: #09090b;
+            color: #fafafa;
+            border-color: #27272a;
+        }
+        input::placeholder, textarea::placeholder {
+            color: #a1a1aa;
+        }
+        html.dark input::placeholder, html.dark textarea::placeholder {
+            color: #52525b;
+        }
+        select option {
+            background-color: #ffffff;
+            color: #18181b;
+        }
+        html.dark select option {
+            background-color: #111113;
+            color: #fafafa;
+        }
+    </style>
+</head>
+<body x-data="{
+        sidebarCollapsed: localStorage.getItem('athena_sidebar_collapsed') === 'true',
+        mobileMenuOpen: false,
+        isDark: document.documentElement.classList.contains('dark'),
+        toggleSidebar() {
+            this.sidebarCollapsed = !this.sidebarCollapsed;
+            localStorage.setItem('athena_sidebar_collapsed', this.sidebarCollapsed);
+        },
+        toggleTheme() {
+            this.isDark = !this.isDark;
+            document.documentElement.classList.toggle('dark', this.isDark);
+            localStorage.setItem('athena_theme', this.isDark ? 'dark' : 'light');
+            window.dispatchEvent(new CustomEvent('athena-theme-changed', { detail: { dark: this.isDark } }));
+        }
+    }"
+    class="bg-[#fafafa] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-zinc-900">
+
+    {{if .User}}
+    <!-- Mobile Sidebar Backdrop -->
+    <div x-show="mobileMenuOpen" x-cloak @click="mobileMenuOpen = false"
+        class="fixed inset-0 bg-black/40 z-40 md:hidden"></div>
+
+    <!-- Vertical Sidebar -->
+    <aside :class="[
+            sidebarCollapsed ? 'md:w-[68px]' : 'md:w-60',
+            mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+        ]"
+        class="fixed md:sticky top-0 left-0 h-screen w-60 bg-white dark:bg-[#0c0c0e] border-r border-zinc-200 dark:border-zinc-800 flex flex-col justify-between shrink-0 z-50 transition-all duration-150">
+        <div class="overflow-y-auto overflow-x-hidden flex-1">
+            <!-- Brand -->
+            <div class="h-14 flex items-center px-4 border-b border-zinc-100 dark:border-zinc-800/80 justify-between">
+                <a href="/dashboard" class="flex items-center gap-2.5 min-w-0">
+                    <img src="/static/logo.png" alt="Athena Shield" class="w-7 h-7 object-contain shrink-0">
+                    <div x-show="!sidebarCollapsed" class="truncate flex items-baseline gap-1.5">
+                        <span class="font-display font-semibold text-sm tracking-tight text-zinc-900 dark:text-white">Athena Shield</span>
+                        <span class="text-[10px] text-zinc-400 font-medium">1.5</span>
+                    </div>
+                </a>
+                <button @click="mobileMenuOpen = false" class="md:hidden text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <!-- Navigation -->
+            <nav class="p-2.5 space-y-0.5">
+                <div x-show="!sidebarCollapsed" class="px-2.5 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    Operations
+                </div>
+
+                <a href="/dashboard" title="Dashboard Telemetry"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "dashboard"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-chart-pie w-4 text-center text-xs {{if eq .ActivePage "dashboard"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">Telemetry</span>
+                </a>
+
+                <a href="/proxy-hosts" title="Reverse Proxy & SSL"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "proxy_hosts"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-network-wired w-4 text-center text-xs {{if eq .ActivePage "proxy_hosts"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">Proxy & SSL</span>
+                </a>
+
+                <a href="/rules" title="Rules & Slot Keywords"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "rules"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-shield-halved w-4 text-center text-xs {{if eq .ActivePage "rules"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">WAF Rules</span>
+                </a>
+
+                <a href="/logs" title="Audit & Attack Logs"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "logs"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-file-lines w-4 text-center text-xs {{if eq .ActivePage "logs"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">Audit Logs</span>
+                </a>
+
+                {{if eq .User.Role "super_admin"}}
+                <div x-show="!sidebarCollapsed" class="px-2.5 pt-4 pb-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    Admin
+                </div>
+                <div x-show="sidebarCollapsed" class="my-2 border-t border-zinc-100 dark:border-zinc-800"></div>
+
+                <a href="/users" title="User Management"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "users"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-user-shield w-4 text-center text-xs {{if eq .ActivePage "users"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">Operators</span>
+                </a>
+
+                <a href="/settings" title="CSIRT, Storage & Backup"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "settings"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    :class="sidebarCollapsed ? 'justify-center' : ''">
+                    <i class="fa-solid fa-sliders w-4 text-center text-xs {{if eq .ActivePage "settings"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <span x-show="!sidebarCollapsed" class="truncate">Settings & Backup</span>
+                </a>
+                {{end}}
+            </nav>
+        </div>
+
+        <!-- User Profile Footer -->
+        <div class="p-2.5 border-t border-zinc-100 dark:border-zinc-800/80">
+            <div class="p-2 rounded-lg flex items-center" :class="sidebarCollapsed ? 'justify-center flex-col gap-2' : 'justify-between'">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <div class="w-7 h-7 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center font-semibold text-xs uppercase shrink-0">
+                        {{firstChar .User.Username}}
+                    </div>
+                    <div x-show="!sidebarCollapsed" class="min-w-0">
+                        <p class="text-xs font-medium text-zinc-900 dark:text-white truncate">{{.User.Username}}</p>
+                        <p class="text-[10px] text-zinc-400 truncate">{{.User.Role}}</p>
+                    </div>
+                </div>
+                <a href="/logout" title="Logout"
+                    class="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors shrink-0">
+                    <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+                </a>
+            </div>
+        </div>
+    </aside>
+    {{end}}
+
+    <!-- Main Stage -->
+    <main class="flex-1 flex flex-col min-w-0 min-h-screen">
+        {{if .User}}
+        <!-- Compact Top Navbar -->
+        <header x-data="hardwareTelemetry()" x-init="startTelemetry()"
+            class="h-14 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
+            <div class="flex items-center gap-3">
+                <button @click="mobileMenuOpen = true" type="button"
+                    class="md:hidden w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800">
+                    <i class="fa-solid fa-bars text-xs"></i>
+                </button>
+                <button @click="toggleSidebar()" type="button" title="Toggle Sidebar"
+                    class="hidden md:flex w-8 h-8 rounded-lg items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+                    <i class="fa-solid text-xs" :class="sidebarCollapsed ? 'fa-indent' : 'fa-outdent'"></i>
+                </button>
+
+                <div class="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span class="font-medium text-zinc-800 dark:text-zinc-200">Shield Online</span>
+                </div>
+            </div>
+
+            <!-- Inline Telemetry & Actions -->
+            <div class="flex items-center gap-3 sm:gap-4 text-xs">
+                <div class="hidden sm:flex items-center gap-3 text-[11px] text-zinc-500 dark:text-zinc-400 tabular-nums">
+                    <span>CPU <strong class="text-zinc-900 dark:text-zinc-100 font-medium" x-text="(sys.cpu_percent || 0) + '%'">0%</strong></span>
+                    <span class="text-zinc-300 dark:text-zinc-700">/</span>
+                    <span>RAM <strong class="text-zinc-900 dark:text-zinc-100 font-medium" x-text="(sys.ram_percent || 0) + '%'">0%</strong></span>
+                </div>
+
+                <button @click="flushNginxCache()" :disabled="flushingCache" title="Bersihkan seluruh cache Nginx sekarang"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 transition-colors text-xs font-medium">
+                    <i class="fa-solid fa-broom text-[10px]" :class="flushingCache ? 'animate-spin' : ''"></i>
+                    <span class="hidden lg:inline" x-text="flushingCache ? 'Flushing...' : 'Flush Cache'">Flush Cache</span>
+                </button>
+
+                <button @click="toggleTheme()" type="button" title="Ganti Tema"
+                    class="w-8 h-8 rounded-lg border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+                    <i class="fa-solid text-xs" :class="isDark ? 'fa-sun' : 'fa-moon'"></i>
+                </button>
+
+                <span id="clock" class="hidden md:inline text-[11px] text-zinc-400 dark:text-zinc-500 tabular-nums"></span>
+            </div>
+        </header>
+
+        <script>
+            function hardwareTelemetry() {
+                return {
+                    sys: {
+                        cpu_percent: 0,
+                        ram_percent: 0,
+                        ram_used_gb: 0,
+                        ram_total_gb: 0
+                    },
+                    flushingCache: false,
+                    async flushNginxCache() {
+                        if (!confirm("Bersihkan seluruh cache HTML & aset statis Nginx sekarang? Halaman web akan langsung menyajikan konten terbaru.")) return;
+                        this.flushingCache = true;
+                        try {
+                            const res = await fetch('/api/cache/purge', { method: 'POST' });
+                            const data = await res.json();
+                            alert(data.message || "Cache berhasil dibersihkan!");
+                        } catch (e) {
+                            alert("Gagal menghubungi server");
+                        } finally {
+                            this.flushingCache = false;
+                        }
+                    },
+                    async fetchHardware() {
+                        try {
+                            const res = await fetch('/api/stats');
+                            if (res.ok) {
+                                const data = await res.json();
+                                if (data.system) {
+                                    this.sys = data.system;
+                                }
+                            }
+                        } catch (e) {}
+                    },
+                    startTelemetry() {
+                        this.fetchHardware();
+                        setInterval(() => this.fetchHardware(), 4000);
+                    }
+                }
+            }
+        </script>
+        {{end}}
+
+        <!-- Content Body -->
+        <div class="p-5 sm:p-6 lg:p-8 flex-1 max-w-[1440px] w-full mx-auto">
+            {{block "content" .}}{{end}}
+        </div>
+    </main>
+
+    <script>
+        function updateClock() {
+            const el = document.getElementById('clock');
+            if (el) {
+                const now = new Date();
+                el.innerText = now.toLocaleTimeString('id-ID', { hour12: false });
+            }
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>
+
+{{end}}

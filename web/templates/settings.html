@@ -1,0 +1,278 @@
+{{template "base" .}}
+{{define "title"}}Settings & Backup — Athena Shield{{end}}
+
+{{define "content"}}
+<div x-data="settingsApp()" x-init="init()" class="space-y-6">
+
+    <!-- Toast -->
+    <div x-show="toast.show" x-cloak x-transition
+        class="fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl border shadow-lg text-xs flex items-center gap-2"
+        :class="toast.isError ? 'bg-rose-50 dark:bg-rose-950 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-200' : 'bg-zinc-900 dark:bg-zinc-100 border-zinc-800 dark:border-zinc-200 text-white dark:text-zinc-900'">
+        <i class="fa-solid text-xs" :class="toast.isError ? 'fa-circle-xmark' : 'fa-circle-check text-emerald-400 dark:text-emerald-600'"></i>
+        <span x-text="toast.message"></span>
+    </div>
+
+    <!-- Header -->
+    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+            <h1 class="text-xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white">
+                CSIRT, Storage & Backup
+            </h1>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Notifikasi Telegram CSIRT, retensi log database, dan backup konfigurasi
+            </p>
+        </div>
+        <button @click="loadSettings()"
+            class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium border border-zinc-200 dark:border-zinc-800 flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-arrows-rotate text-[11px] text-zinc-400" :class="loading ? 'animate-spin' : ''"></i>
+            <span>Refresh</span>
+        </button>
+    </div>
+
+    <!-- Storage Telemetry -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Ukuran Database WAF</div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="storage.db_size_mb + ' MB'">0 MB</div>
+            <div class="text-[11px] text-zinc-400 mt-1">SQLite WAL + Async Queue</div>
+        </div>
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Log Trafik Normal</div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(storage.clean_logs_count || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-zinc-400 mt-1 tabular-nums" x-text="'Auto-Prune > ' + form.log_retention_clean_days + ' hari'"></div>
+        </div>
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Log Insiden Serangan</div>
+            <div class="text-2xl font-display font-semibold text-rose-600 dark:text-rose-400 mt-1.5 tabular-nums" x-text="(storage.attack_logs_count || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-zinc-400 mt-1 tabular-nums" x-text="'Auto-Prune > ' + form.log_retention_attack_days + ' hari'"></div>
+        </div>
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">IP Auto-Ban Aktif (24H)</div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(storage.active_autobans_count || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-zinc-400 mt-1">Shared Multi-Worker</div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <!-- Telegram CSIRT -->
+        <div class="dasher-card rounded-xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
+                <div>
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Telegram CSIRT Alert</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Notifikasi instan dengan cooldown 60 detik</p>
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer text-xs">
+                    <input type="checkbox" x-model="form.telegram_enabled" class="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-0">
+                    <span class="font-medium" :class="form.telegram_enabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'" x-text="form.telegram_enabled ? 'Enabled' : 'Disabled'"></span>
+                </label>
+            </div>
+
+            <div class="space-y-3.5 text-xs">
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">Bot Token</label>
+                    <div class="relative">
+                        <input :type="showBotToken ? 'text' : 'password'" x-model="form.telegram_bot_token" placeholder="1234567890:AAHxyz..."
+                            class="w-full pl-3 pr-9 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                        <button type="button" @click="showBotToken = !showBotToken" class="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
+                            <i class="fa-solid text-xs" :class="showBotToken ? 'fa-eye-slash' : 'fa-eye'"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">Chat ID / Group ID</label>
+                    <input type="text" x-model="form.telegram_chat_id" placeholder="-1001234567890"
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+
+                <div class="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-2">
+                    <div class="text-xs font-medium text-zinc-800 dark:text-zinc-200">Jenis Insiden:</div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" x-model="form.telegram_alert_attacks" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                        <span class="text-zinc-600 dark:text-zinc-300">Serangan Berbahaya (Judi Slot, SQLi, XSS, Webshell, LFI)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" x-model="form.telegram_alert_autoban" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                        <span class="text-zinc-600 dark:text-zinc-300">Aktivasi IP Auto-Ban 24 Jam</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" x-model="form.telegram_alert_upstream_down" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                        <span class="text-zinc-600 dark:text-zinc-300">Server Backend Down / Timeout (502 & 504)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" x-model="form.telegram_alert_monitor" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                        <span class="text-zinc-600 dark:text-zinc-300">Deteksi pada Domain Mode Monitor</span>
+                    </label>
+                </div>
+
+                <div class="flex flex-wrap gap-2 pt-1">
+                    <button @click="saveAllSettings()" :disabled="saving"
+                        class="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        <span x-text="saving ? 'Menyimpan...' : 'Simpan Pengaturan'"></span>
+                    </button>
+                    <button @click="testTelegram()" :disabled="testingTelegram"
+                        class="px-3.5 py-2 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium transition-colors">
+                        <span x-text="testingTelegram ? 'Mengirim...' : 'Tes Telegram'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Retention & Backup -->
+        <div class="space-y-5">
+            <div class="dasher-card rounded-xl p-6 space-y-4">
+                <div class="border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Retensi Log Database</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Auto-pruning untuk mencegah disk penuh</p>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5 text-xs">
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">Log Normal (Hari)</label>
+                        <input type="number" min="1" max="365" x-model.number="form.log_retention_clean_days"
+                            class="w-full px-3 py-2 border rounded-lg tabular-nums">
+                    </div>
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">Log Serangan (Hari)</label>
+                        <input type="number" min="1" max="3650" x-model.number="form.log_retention_attack_days"
+                            class="w-full px-3 py-2 border rounded-lg tabular-nums">
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-2 pt-1 text-xs">
+                    <button @click="saveAllSettings()" :disabled="saving"
+                        class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        Simpan Retensi
+                    </button>
+                    <button @click="pruneLogsNow()" :disabled="pruning"
+                        class="px-3.5 py-2 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium transition-colors">
+                        <span x-text="pruning ? 'Membersihkan...' : 'Prune Log Sekarang'"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="dasher-card rounded-xl p-6 space-y-4">
+                <div class="border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Backup & HA Sync</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Ekspor atau impor Proxy Hosts, SSL, Rules & IP list</p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-2.5 text-xs">
+                    <a href="/api/backup/export"
+                        class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors inline-flex items-center gap-2">
+                        <i class="fa-solid fa-download text-[11px]"></i>
+                        <span>Export Backup (.json)</span>
+                    </a>
+
+                    <label class="px-3.5 py-2 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium transition-colors inline-flex items-center gap-2 cursor-pointer">
+                        <i class="fa-solid fa-upload text-[11px]"></i>
+                        <span x-text="importing ? 'Memulihkan...' : 'Import Backup (.json)'"></span>
+                        <input type="file" accept=".json,application/json" class="hidden" @change="importBackupFile($event)" :disabled="importing">
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function settingsApp() {
+    return {
+        loading: false,
+        saving: false,
+        testingTelegram: false,
+        pruning: false,
+        importing: false,
+        showBotToken: false,
+        toast: { show: false, message: '', isError: false },
+        storage: { db_size_mb: 0, clean_logs_count: 0, attack_logs_count: 0, active_autobans_count: 0 },
+        form: {
+            telegram_enabled: false,
+            telegram_bot_token: '',
+            telegram_chat_id: '',
+            telegram_alert_attacks: true,
+            telegram_alert_autoban: true,
+            telegram_alert_monitor: true,
+            telegram_alert_upstream_down: true,
+            log_retention_clean_days: 14,
+            log_retention_attack_days: 60
+        },
+
+        notify(msg, isError = false) {
+            this.toast = { show: true, message: msg, isError };
+            setTimeout(() => { this.toast.show = false; }, 4000);
+        },
+        async init() { await this.loadSettings(); },
+        async loadSettings() {
+            this.loading = true;
+            try {
+                const res = await fetch('/api/settings');
+                if (res.ok) {
+                    const data = await res.json();
+                    this.form = { ...this.form, ...data.settings };
+                    this.storage = { ...this.storage, ...data.storage };
+                }
+            } catch (e) { this.notify('Gagal memuat pengaturan sistem', true); }
+            finally { this.loading = false; }
+        },
+        async saveAllSettings() {
+            this.saving = true;
+            try {
+                const res = await fetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+                const data = await res.json();
+                if (res.ok) { this.notify(data.message || 'Pengaturan disimpan!'); await this.loadSettings(); }
+                else { this.notify(data.detail || 'Gagal menyimpan pengaturan', true); }
+            } catch (e) { this.notify('Kesalahan jaringan saat menyimpan', true); }
+            finally { this.saving = false; }
+        },
+        async testTelegram() {
+            this.testingTelegram = true;
+            try {
+                const res = await fetch('/api/settings/test-telegram', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bot_token: this.form.telegram_bot_token, chat_id: this.form.telegram_chat_id })
+                });
+                const data = await res.json();
+                if (res.ok) this.notify(data.message);
+                else this.notify(data.detail || 'Tes Telegram gagal', true);
+            } catch (e) { this.notify('Gagal menghubungi endpoint tes Telegram', true); }
+            finally { this.testingTelegram = false; }
+        },
+        async pruneLogsNow() {
+            this.pruning = true;
+            try {
+                await this.saveAllSettings();
+                const res = await fetch('/api/settings/prune-logs', { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) { this.notify(data.message); await this.loadSettings(); }
+                else this.notify(data.detail || 'Gagal membersihkan log', true);
+            } catch (e) { this.notify('Gagal menjalankan pembersihan log', true); }
+            finally { this.pruning = false; }
+        },
+        async importBackupFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (!confirm(`Pulihkan konfigurasi dari file "${file.name}"?`)) { event.target.value = ''; return; }
+            this.importing = true;
+            try {
+                const jsonPayload = JSON.parse(await file.text());
+                const res = await fetch('/api/backup/import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jsonPayload)
+                });
+                const data = await res.json();
+                if (res.ok) { this.notify(data.message); await this.loadSettings(); }
+                else this.notify(data.detail || 'Gagal mengimpor file backup', true);
+            } catch (e) { this.notify('Format file JSON tidak valid: ' + e.message, true); }
+            finally { this.importing = false; event.target.value = ''; }
+        }
+    };
+}
+</script>
+{{end}}

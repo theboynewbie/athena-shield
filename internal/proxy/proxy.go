@@ -95,6 +95,10 @@ func NewRouter(
 	return rt
 }
 
+func (rt *Router) SetRenderer(r BlockRenderer) {
+	rt.renderer = r
+}
+
 func (rt *Router) Reload() {
 	if rt.store == nil {
 		return

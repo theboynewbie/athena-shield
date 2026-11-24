@@ -1,0 +1,363 @@
+{{template "base" .}}
+{{define "title"}}Telemetry — Athena Shield{{end}}
+
+{{define "content"}}
+<div x-data="dashboardApp()" x-init="initData()" class="space-y-6">
+
+    <!-- Page Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+            <h1 class="text-xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white">
+                Threat Telemetry
+            </h1>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Deep packet inspection stream across all protected websites & applications
+            </p>
+        </div>
+        <button @click="fetchStats()"
+            class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium border border-zinc-200 dark:border-zinc-800 flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-arrows-rotate text-[11px] text-zinc-400" :class="loading ? 'animate-spin' : ''"></i>
+            <span>Sync</span>
+        </button>
+    </div>
+
+    <!-- 4 Editorial KPI Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Inbound Requests</div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.total_requests || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Reverse proxied traffic</div>
+        </div>
+
+        <div class="dasher-card rounded-xl p-5">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Attacks Neutralized</span>
+                <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+            </div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.blocked_requests || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-rose-600 dark:text-rose-400 mt-1 tabular-nums" x-text="blockRate() + '% block ratio (HTTP 403)'">0% block ratio</div>
+        </div>
+
+        <div class="dasher-card rounded-xl p-5">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Clean Traffic</span>
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            </div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.allowed_requests || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Forwarded to upstream</div>
+        </div>
+
+        <div class="dasher-card rounded-xl p-5">
+            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Active Defense Rules</div>
+            <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="stats.active_rules_count || 0">0</div>
+            <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Slot + OWASP compiled</div>
+        </div>
+    </div>
+
+    <!-- Chart & Threat Breakdown -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <div class="lg:col-span-2 dasher-card rounded-xl p-5">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-5">
+                <div>
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Traffic & Threat Volume (24h)</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Clean vs neutralized requests</p>
+                </div>
+                <div class="flex items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500"></span> Clean</span>
+                    <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-rose-500"></span> Blocked</span>
+                </div>
+            </div>
+            <div class="h-64 relative w-full">
+                <canvas id="trafficChart" style="display: block; width: 100%; height: 100%;"></canvas>
+            </div>
+        </div>
+
+        <div class="dasher-card rounded-xl p-5 flex flex-col justify-between">
+            <div>
+                <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Threat Breakdown</h2>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 mb-4">Top neutralized vectors</p>
+
+                <div class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                    <template x-for="item in stats.attack_breakdown" :key="item.reason">
+                        <div class="py-2.5 flex items-center justify-between text-xs gap-3">
+                            <span class="text-zinc-700 dark:text-zinc-300 truncate" x-text="item.reason"></span>
+                            <span class="text-rose-600 dark:text-rose-400 font-medium tabular-nums shrink-0" x-text="item.count + ' hits'"></span>
+                        </div>
+                    </template>
+                    <div x-show="!stats.attack_breakdown || stats.attack_breakdown.length === 0" class="py-10 text-center text-zinc-400 text-xs">
+                        No cyber attacks detected yet.
+                    </div>
+                </div>
+            </div>
+            <div class="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800 text-xs text-zinc-500 flex items-center justify-between">
+                <span>Engine: Running</span>
+                <a href="/rules" class="text-zinc-900 dark:text-white hover:underline font-medium">Rules &rarr;</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div class="dasher-card rounded-xl p-5">
+            <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Top Offending Host IPs</h2>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 mb-4">Highest violation drop counts</p>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="text-zinc-400 border-b border-zinc-200 dark:border-zinc-800 text-[11px] font-medium">
+                        <tr>
+                            <th class="pb-2.5 font-medium">IP Address</th>
+                            <th class="pb-2.5 font-medium">Violations</th>
+                            <th class="pb-2.5 font-medium text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                        <template x-for="item in stats.top_attackers" :key="item.ip">
+                            <tr>
+                                <td class="py-3 text-zinc-900 dark:text-white font-medium tabular-nums">
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span x-text="item.ip"></span>
+                                        <template x-if="item.country_code">
+                                            <span class="text-[11px] text-zinc-500 dark:text-zinc-400 inline-flex items-center gap-1" :title="item.country || item.country_code">
+                                                <template x-if="item.country_code && item.country_code.length === 2">
+                                                    <img :src="'https://flagcdn.com/24x18/' + item.country_code.toLowerCase() + '.png'"
+                                                         class="w-3.5 h-2.5 rounded-[2px] object-cover inline"
+                                                         :alt="item.country_code"
+                                                         loading="lazy"
+                                                         @error="$el.style.display='none'">
+                                                </template>
+                                                <template x-if="!item.country_code || item.country_code.length !== 2">
+                                                    <span x-text="getFlagEmoji(item.country_code)"></span>
+                                                </template>
+                                                <span x-text="item.country_code"></span>
+                                            </span>
+                                        </template>
+                                    </div>
+                                </td>
+                                <td class="py-3 text-rose-600 dark:text-rose-400 tabular-nums" x-text="item.count"></td>
+                                <td class="py-3 text-right">
+                                    <button @click="quickBlacklist(item.ip)" class="px-2.5 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 text-zinc-600 dark:text-zinc-300 hover:text-rose-600 dark:hover:text-rose-400 text-[11px] font-medium transition-colors">
+                                        Ban IP
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                        <tr x-show="!stats.top_attackers || stats.top_attackers.length === 0">
+                            <td colspan="3" class="py-8 text-center text-zinc-400">
+                                No attacker IP records logged yet
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dasher-card rounded-xl p-5">
+            <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Multi-App Defense Architecture</h2>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 mb-4">Virtual patching for WordPress, SLiMS, OJS, Laravel & APIs</p>
+
+            <div class="divide-y divide-zinc-100 dark:divide-zinc-800/80 text-xs">
+                <div class="py-3">
+                    <div class="font-medium text-zinc-900 dark:text-white">Anti-Judi Slot & Aggressive Crawler Shield</div>
+                    <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Blokir injeksi judol serta drop bot scraper (<code class="text-zinc-700 dark:text-zinc-300">ClaudeBot</code>, <code class="text-zinc-700 dark:text-zinc-300">SemrushBot</code>, <code class="text-zinc-700 dark:text-zinc-300">AhrefsBot</code>) di Edge Nginx.</p>
+                </div>
+                <div class="py-3">
+                    <div class="font-medium text-zinc-900 dark:text-white">Multi-Framework Virtual Patching</div>
+                    <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Proteksi <code class="text-zinc-700 dark:text-zinc-300">.env</code>, <code class="text-zinc-700 dark:text-zinc-300">.git</code>, <code class="text-zinc-700 dark:text-zinc-300">sysconfig</code>, <code class="text-zinc-700 dark:text-zinc-300">config.inc.php</code>, <code class="text-zinc-700 dark:text-zinc-300">wp-config.php</code>, Log4Shell, & anti-webshell.</p>
+                </div>
+                <div class="py-3">
+                    <div class="font-medium text-zinc-900 dark:text-white">Multi-Tier Rate Limiting & 24H Auto-Ban</div>
+                    <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Proteksi brute-force lintas endpoint login (<code class="text-zinc-700 dark:text-zinc-300">/login</code>, <code class="text-zinc-700 dark:text-zinc-300">?p=login</code>, <code class="text-zinc-700 dark:text-zinc-300">/wp-login.php</code>) dengan auto-jail 24 jam.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function dashboardApp() {
+    return {
+        stats: {},
+        loading: false,
+        chartInstance: null,
+
+        async initData() {
+            await this.fetchStats();
+            setInterval(() => this.fetchStats(), 8000);
+            window.addEventListener('athena-theme-changed', () => {
+                if (this.chartInstance) {
+                    this.chartInstance.destroy();
+                    this.chartInstance = null;
+                }
+                this.renderChart();
+            });
+        },
+
+        blockRate() {
+            if (!this.stats.total_requests || this.stats.total_requests === 0) return 0;
+            return Math.round((this.stats.blocked_requests / this.stats.total_requests) * 100);
+        },
+
+        async fetchStats() {
+            this.loading = true;
+            try {
+                const res = await fetch('/api/stats');
+                if (res.ok) {
+                    this.stats = await res.json();
+                    this.$nextTick(() => {
+                        this.renderChart();
+                    });
+                }
+            } catch (err) {
+                console.error("Failed to load telemetry:", err);
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        renderChart() {
+            if (!this.stats.chart) return;
+            if (typeof Chart === 'undefined') {
+                setTimeout(() => this.renderChart(), 300);
+                return;
+            }
+            const canvas = document.getElementById('trafficChart');
+            if (!canvas) {
+                setTimeout(() => this.renderChart(), 200);
+                return;
+            }
+            if (this.chartInstance) {
+                this.chartInstance.data.labels = this.stats.chart.labels || [];
+                this.chartInstance.data.datasets[0].data = this.stats.chart.clean || [];
+                this.chartInstance.data.datasets[1].data = this.stats.chart.blocked || [];
+                this.chartInstance.update('none');
+                return;
+            }
+
+            const isDark = document.documentElement.classList.contains('dark');
+            const gridColor = isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(24, 24, 27, 0.05)';
+            const tickColor = isDark ? '#71717a' : '#71717a';
+
+            const ctx = canvas.getContext('2d');
+
+            const gradClean = ctx.createLinearGradient(0, 0, 0, 260);
+            gradClean.addColorStop(0, 'rgba(16, 185, 129, 0.12)');
+            gradClean.addColorStop(1, 'rgba(16, 185, 129, 0.00)');
+
+            const gradBlocked = ctx.createLinearGradient(0, 0, 0, 260);
+            gradBlocked.addColorStop(0, 'rgba(244, 63, 94, 0.14)');
+            gradBlocked.addColorStop(1, 'rgba(244, 63, 94, 0.00)');
+
+            this.chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: this.stats.chart.labels || [],
+                    datasets: [
+                        {
+                            label: 'Clean Proxied',
+                            data: this.stats.chart.clean || [],
+                            borderColor: '#10b981',
+                            backgroundColor: gradClean,
+                            fill: true,
+                            tension: 0.3,
+                            borderWidth: 1.75,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            pointBackgroundColor: '#10b981'
+                        },
+                        {
+                            label: 'Attacks Blocked',
+                            data: this.stats.chart.blocked || [],
+                            borderColor: '#f43f5e',
+                            backgroundColor: gradBlocked,
+                            fill: true,
+                            tension: 0.3,
+                            borderWidth: 1.75,
+                            pointRadius: 0,
+                            pointHoverRadius: 4,
+                            pointBackgroundColor: '#f43f5e'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: { duration: 400 },
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: isDark ? '#18181b' : '#18181b',
+                            borderColor: '#27272a',
+                            borderWidth: 1,
+                            titleFont: { family: 'Poppins', size: 11 },
+                            bodyFont: { family: 'Poppins', size: 11 },
+                            padding: 10,
+                            boxPadding: 4
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            border: { display: false },
+                            ticks: {
+                                color: tickColor,
+                                font: { family: 'Poppins', size: 10 },
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 10
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            border: { display: false },
+                            grid: { color: gridColor },
+                            ticks: {
+                                color: tickColor,
+                                font: { family: 'Poppins', size: 10 },
+                                precision: 0
+                            }
+                        }
+                    }
+                }
+            });
+        },
+
+        getFlagEmoji(cc) {
+            if (!cc || cc === 'LAN' || cc === 'LOCAL') return '🏠';
+            if (cc.length !== 2) return '🌐';
+            try {
+                const codePoints = cc.toUpperCase().split('').map(c => 127397 + c.charCodeAt(0));
+                return String.fromCodePoint(...codePoints);
+            } catch(e) {
+                return '🌐';
+            }
+        },
+
+        async quickBlacklist(ip) {
+            if (!confirm(`Permanently blacklist and ban IP address ${ip}?`)) return;
+            try {
+                const res = await fetch('/api/ips', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ip_address: ip,
+                        list_type: 'BLACKLIST',
+                        reason: 'Permanently banned from telemetry dashboard'
+                    })
+                });
+                if (res.ok) {
+                    alert(`IP ${ip} successfully moved to Blacklist!`);
+                } else {
+                    const data = await res.json();
+                    alert(data.detail || "Failed to blacklist IP");
+                }
+            } catch (err) {
+                alert("Network error");
+            }
+        }
+    }
+}
+</script>
+{{end}}

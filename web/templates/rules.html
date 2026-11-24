@@ -1,0 +1,259 @@
+{{template "base" .}}
+{{define "title"}}WAF Rules — Athena Shield{{end}}
+
+{{define "content"}}
+<div x-data="rulesApp()" x-init="init()" class="space-y-6">
+
+    <!-- Top Action Bar -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+            <h1 class="text-xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white">
+                WAF Rules & Slot Keywords
+            </h1>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Aturan Regex & kata kunci aktif di-compile secara real-time tanpa restart
+            </p>
+        </div>
+        <button @click="openModal()"
+            class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-plus text-[11px]"></i>
+            <span>Tambah Rule</span>
+        </button>
+    </div>
+
+    <!-- Category Filter Tabs -->
+    <div class="flex flex-wrap gap-1.5 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+        <button @click="selectedCategory = 'all'"
+            :class="selectedCategory === 'all' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            Semua
+        </button>
+        <button @click="selectedCategory = 'judi_slot'"
+            :class="selectedCategory === 'judi_slot' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            Judi & Slot
+        </button>
+        <button @click="selectedCategory = 'sqli'"
+            :class="selectedCategory === 'sqli' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            SQL Injection
+        </button>
+        <button @click="selectedCategory = 'xss'"
+            :class="selectedCategory === 'xss' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            XSS
+        </button>
+        <button @click="selectedCategory = 'path_traversal'"
+            :class="selectedCategory === 'path_traversal' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            Path Traversal
+        </button>
+        <button @click="selectedCategory = 'bot_attack'"
+            :class="selectedCategory === 'bot_attack' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
+            Bad Bots
+        </button>
+    </div>
+
+    <!-- Rules Table -->
+    <div class="dasher-card rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="text-zinc-500 dark:text-zinc-400 bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 font-medium text-[11px]">
+                    <tr>
+                        <th class="px-5 py-3 font-medium">Nama Rule</th>
+                        <th class="px-5 py-3 font-medium">Kategori</th>
+                        <th class="px-5 py-3 font-medium">Pola Regex</th>
+                        <th class="px-5 py-3 font-medium">Status</th>
+                        <th class="px-5 py-3 font-medium text-right">Aksi</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                    <template x-for="rule in filteredRules()" :key="rule.id">
+                        <tr class="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors">
+                            <td class="px-5 py-3.5">
+                                <span x-text="rule.name" class="font-medium text-zinc-900 dark:text-white text-sm block"></span>
+                                <span x-text="rule.description || '-'" class="text-[11px] text-zinc-400 block mt-0.5"></span>
+                            </td>
+                            <td class="px-5 py-3.5 text-zinc-600 dark:text-zinc-300" x-text="rule.category"></td>
+                            <td class="px-5 py-3.5 max-w-md">
+                                <div class="bg-zinc-50 dark:bg-zinc-900 p-2 rounded-lg border border-zinc-200/80 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 text-[11px] break-all max-h-20 overflow-y-auto">
+                                    <code x-text="rule.pattern"></code>
+                                </div>
+                            </td>
+                            <td class="px-5 py-3.5">
+                                <button @click="toggleRule(rule)"
+                                    class="inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+                                    :class="rule.is_active ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="rule.is_active ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-600'"></span>
+                                    <span x-text="rule.is_active ? 'Active' : 'Disabled'"></span>
+                                </button>
+                            </td>
+                            <td class="px-5 py-3.5 text-right space-x-1">
+                                <button @click="editRule(rule)" class="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md transition-colors" title="Edit Rule">
+                                    <i class="fa-solid fa-pen-to-square text-xs"></i>
+                                </button>
+                                <button @click="deleteRule(rule.id)" class="p-1.5 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-md transition-colors" title="Hapus Rule">
+                                    <i class="fa-solid fa-trash-can text-xs"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                    <tr x-show="filteredRules().length === 0">
+                        <td colspan="5" class="px-5 py-12 text-center text-zinc-400 text-xs">
+                            Tidak ada rule pada kategori ini.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal Form -->
+    <div x-show="showModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div @click.away="showModal = false" class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-lg w-full p-6 shadow-xl space-y-5">
+            <div class="flex justify-between items-center pb-3.5 border-b border-zinc-100 dark:border-zinc-800">
+                <div>
+                    <h3 class="font-display font-semibold text-base text-zinc-900 dark:text-white" x-text="isEdit ? 'Edit Aturan WAF' : 'Tambah Aturan WAF'"></h3>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Konfigurasi pola regex dan kata kunci filter</p>
+                </div>
+                <button @click="showModal = false" class="w-7 h-7 rounded-md flex items-center justify-center text-zinc-400 hover:text-zinc-900 dark:hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <form @submit.prevent="saveRule()" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Nama Rule</label>
+                    <input type="text" x-model="form.name" required placeholder="Contoh: Blokir Keyword Slot Kamboja"
+                        class="w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Kategori</label>
+                        <select x-model="form.category" class="w-full px-3 py-2 border rounded-lg text-xs">
+                            <option value="judi_slot">Judi & Slot Gacor</option>
+                            <option value="sqli">SQL Injection</option>
+                            <option value="xss">Cross-Site Scripting</option>
+                            <option value="path_traversal">Path Traversal</option>
+                            <option value="bot_attack">Bad Bot / Scanner</option>
+                            <option value="custom">Custom Signature</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Action</label>
+                        <select x-model="form.action" class="w-full px-3 py-2 border rounded-lg text-xs">
+                            <option value="BLOCK">BLOCK (HTTP 403)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Pola Regex (Case-Insensitive)</label>
+                    <textarea x-model="form.pattern" required rows="3" placeholder="(slot[\s_-]*gacor|pragmatic|maxwin)"
+                        class="w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400"></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Deskripsi (Opsional)</label>
+                    <input type="text" x-model="form.description" placeholder="Keterangan singkat aturan ini"
+                        class="w-full px-3 py-2 border rounded-lg text-xs focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+
+                <div class="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="ruleActive" x-model="form.is_active" class="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-0">
+                    <label for="ruleActive" class="text-xs text-zinc-700 dark:text-zinc-300 cursor-pointer">Aktifkan proteksi rule ini segera</label>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                    <button type="button" @click="showModal = false" class="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium">
+                        Batal
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium">
+                        Simpan Rule
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function rulesApp() {
+    return {
+        rules: [],
+        selectedCategory: 'all',
+        showModal: false,
+        isEdit: false,
+        form: {
+            id: null,
+            name: '',
+            category: 'judi_slot',
+            pattern: '',
+            description: '',
+            action: 'BLOCK',
+            is_active: true
+        },
+
+        async init() { await this.loadRules(); },
+        filteredRules() {
+            if (this.selectedCategory === 'all') return this.rules;
+            return this.rules.filter(r => r.category === this.selectedCategory);
+        },
+        async loadRules() {
+            try {
+                const res = await fetch('/api/rules');
+                if (res.ok) this.rules = await res.json();
+            } catch (err) { console.error("Gagal memuat rules:", err); }
+        },
+        openModal() {
+            this.isEdit = false;
+            this.form = { id: null, name: '', category: 'judi_slot', pattern: '', description: '', action: 'BLOCK', is_active: true };
+            this.showModal = true;
+        },
+        editRule(rule) {
+            this.isEdit = true;
+            this.form = { ...rule };
+            this.showModal = true;
+        },
+        async saveRule() {
+            const method = this.isEdit ? 'PUT' : 'POST';
+            const url = this.isEdit ? `/api/rules/${this.form.id}` : '/api/rules';
+            try {
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+                if (res.ok) {
+                    this.showModal = false;
+                    await this.loadRules();
+                } else {
+                    const data = await res.json();
+                    alert(data.detail || "Gagal menyimpan rule");
+                }
+            } catch (err) { alert("Kesalahan jaringan"); }
+        },
+        async toggleRule(rule) {
+            try {
+                const res = await fetch(`/api/rules/${rule.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: !rule.is_active })
+                });
+                if (res.ok) rule.is_active = !rule.is_active;
+            } catch (err) { console.error(err); }
+        },
+        async deleteRule(id) {
+            if (!confirm("Hapus rule proteksi ini?")) return;
+            try {
+                const res = await fetch(`/api/rules/${id}`, { method: 'DELETE' });
+                if (res.ok) await this.loadRules();
+            } catch (err) { alert("Gagal menghapus rule"); }
+        }
+    }
+}
+</script>
+{{end}}

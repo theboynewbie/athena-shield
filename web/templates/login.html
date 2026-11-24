@@ -1,0 +1,67 @@
+{{template "base" .}}
+{{define "title"}}Sign In — Athena Shield{{end}}
+
+{{define "content"}}
+<div class="min-h-[86vh] flex flex-col justify-center items-center px-4 relative">
+    <!-- Theme Switcher -->
+    <div class="fixed top-4 right-4 z-20">
+        <button @click="toggleTheme()" type="button" title="Ganti Tema"
+            class="w-8 h-8 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors">
+            <i class="fa-solid text-xs" :class="isDark ? 'fa-sun' : 'fa-moon'"></i>
+        </button>
+    </div>
+
+    <div class="max-w-[380px] w-full">
+        <div class="flex items-center gap-2.5 justify-center mb-6">
+            <img src="/static/logo.png" alt="Athena Shield" class="w-7 h-7 object-contain">
+            <span class="font-display font-semibold text-base tracking-tight text-zinc-900 dark:text-white">Athena Shield</span>
+        </div>
+
+        <div class="dasher-card rounded-xl p-6 sm:p-7">
+            <div class="mb-5">
+                <h1 class="text-base font-display font-semibold text-zinc-900 dark:text-white">Sign in</h1>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">Masukkan kredensial operator Anda.</p>
+            </div>
+
+            {{if .Error}}
+            <div class="mb-4 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-rose-700 dark:text-rose-400 text-xs flex items-center gap-2">
+                <i class="fa-solid fa-circle-exclamation shrink-0"></i>
+                <span>{{.Error}}</span>
+            </div>
+            {{end}}
+
+            <form method="POST" action="/login" class="space-y-4" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+
+                <div style="position: absolute; left: -9999px; top: -9999px; opacity: 0; pointer-events: none;" aria-hidden="true">
+                    <input type="text" name="website_trap" tabindex="-1" autocomplete="off">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Username</label>
+                    <input type="text" name="username" required autofocus placeholder="admin" autocomplete="off"
+                        class="w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400 transition-colors">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Password</label>
+                    <div class="relative">
+                        <input id="loginPasswordInput" type="password" name="password" required placeholder="••••••••" autocomplete="new-password"
+                            class="w-full pl-3 pr-9 py-2 border rounded-lg text-sm focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400 transition-colors">
+                        <button type="button" onclick="const p=document.getElementById('loginPasswordInput'),i=document.getElementById('loginPasswordEye');if(p.type==='password'){p.type='text';i.classList.replace('fa-eye','fa-eye-slash');}else{p.type='password';i.classList.replace('fa-eye-slash','fa-eye');}"
+                            title="Tampilkan / Sembunyikan Password"
+                            class="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors focus:outline-none">
+                            <i id="loginPasswordEye" class="fa-regular fa-eye text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit"
+                    class="w-full py-2 px-4 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium rounded-lg text-sm transition-colors mt-2">
+                    Sign In
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{{end}}

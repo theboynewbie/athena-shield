@@ -1,0 +1,300 @@
+{{template "base" .}}
+{{define "title"}}Operators — Athena Shield{{end}}
+
+{{define "content"}}
+<div x-data="usersApp()" x-init="init()" class="space-y-6">
+
+    <!-- Header -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+            <h1 class="text-xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white">
+                Operator Management
+            </h1>
+            <p class="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                Create operators, modify credentials, reset passwords, and assign roles
+            </p>
+        </div>
+        <button @click="openCreateModal()"
+            class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-plus text-[11px]"></i>
+            <span>Add Operator</span>
+        </button>
+    </div>
+
+    <!-- Users Table -->
+    <div class="dasher-card rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="text-zinc-500 dark:text-zinc-400 bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 font-medium text-[11px]">
+                    <tr>
+                        <th class="px-5 py-3 font-medium">ID</th>
+                        <th class="px-5 py-3 font-medium">Operator</th>
+                        <th class="px-5 py-3 font-medium">Email</th>
+                        <th class="px-5 py-3 font-medium">Role</th>
+                        <th class="px-5 py-3 font-medium">Status</th>
+                        <th class="px-5 py-3 font-medium">Created</th>
+                        <th class="px-5 py-3 font-medium text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                    <template x-for="user in users" :key="user.id">
+                        <tr class="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30 transition-colors">
+                            <td class="px-5 py-3.5 text-zinc-400 tabular-nums" x-text="'#' + user.id"></td>
+                            <td class="px-5 py-3.5">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-7 h-7 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center font-semibold text-xs uppercase shrink-0">
+                                        <span x-text="user.username[0]"></span>
+                                    </div>
+                                    <span x-text="user.username" class="font-medium text-zinc-900 dark:text-white text-sm"></span>
+                                </div>
+                            </td>
+                            <td class="px-5 py-3.5 text-zinc-600 dark:text-zinc-300" x-text="user.email"></td>
+                            <td class="px-5 py-3.5 text-zinc-700 dark:text-zinc-300" x-text="user.role"></td>
+                            <td class="px-5 py-3.5">
+                                <button @click="toggleStatus(user)"
+                                    class="inline-flex items-center gap-1.5 text-xs font-medium transition-colors"
+                                    :class="user.is_active ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'">
+                                    <span class="w-1.5 h-1.5 rounded-full" :class="user.is_active ? 'bg-emerald-500' : 'bg-rose-500'"></span>
+                                    <span x-text="user.is_active ? 'Active' : 'Suspended'"></span>
+                                </button>
+                            </td>
+                            <td class="px-5 py-3.5 text-zinc-500 dark:text-zinc-400 tabular-nums" x-text="new Date(user.created_at.endsWith('Z') || user.created_at.includes('+') ? user.created_at : user.created_at + 'Z').toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })"></td>
+                            <td class="px-5 py-3.5 text-right space-x-1">
+                                <button @click="openEditModal(user)" class="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-md transition-colors" title="Edit">
+                                    <i class="fa-solid fa-user-pen text-xs"></i>
+                                </button>
+                                <button @click="openResetModal(user)" class="p-1.5 text-zinc-400 hover:text-amber-600 dark:hover:text-amber-400 rounded-md transition-colors" title="Reset Password">
+                                    <i class="fa-solid fa-key text-xs"></i>
+                                </button>
+                                <button @click="deleteUser(user.id)" class="p-1.5 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-md transition-colors" title="Delete">
+                                    <i class="fa-solid fa-trash-can text-xs"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Modal 1: Create User -->
+    <div x-show="showCreateModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div @click.away="showCreateModal = false" class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full p-6 shadow-xl space-y-5">
+            <div class="flex justify-between items-center pb-3.5 border-b border-zinc-100 dark:border-zinc-800">
+                <div>
+                    <h3 class="font-display font-semibold text-base text-zinc-900 dark:text-white">Create Operator</h3>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Provision security console access</p>
+                </div>
+                <button @click="showCreateModal = false" class="text-zinc-400 hover:text-zinc-900 dark:hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <form @submit.prevent="createUser()" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Username</label>
+                    <input type="text" x-model="createForm.username" required placeholder="secops_operator"
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Email Address</label>
+                    <input type="email" x-model="createForm.email" required placeholder="operator@domain.com"
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Initial Password</label>
+                    <input type="password" x-model="createForm.password" required placeholder="••••••••••••"
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Role</label>
+                    <select x-model="createForm.role" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="admin">Admin (Read-Only / Monitor)</option>
+                        <option value="super_admin">Super Admin (Full Access)</option>
+                    </select>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                    <button type="button" @click="showCreateModal = false" class="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium">
+                        Create
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 2: Edit User -->
+    <div x-show="showEditModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div @click.away="showEditModal = false" class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full p-6 shadow-xl space-y-5">
+            <div class="flex justify-between items-center pb-3.5 border-b border-zinc-100 dark:border-zinc-800">
+                <div>
+                    <h3 class="font-display font-semibold text-base text-zinc-900 dark:text-white">Edit Operator</h3>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Modify credentials & permissions</p>
+                </div>
+                <button @click="showEditModal = false" class="text-zinc-400 hover:text-zinc-900 dark:hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <form @submit.prevent="updateUser()" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Username</label>
+                    <input type="text" x-model="editForm.username" required
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Email Address</label>
+                    <input type="email" x-model="editForm.email" required
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Role</label>
+                    <select x-model="editForm.role" class="w-full px-3 py-2 border rounded-lg">
+                        <option value="admin">Admin (Read-Only / Monitor)</option>
+                        <option value="super_admin">Super Admin (Full Access)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Update Password (Optional)</label>
+                    <input type="password" x-model="editForm.password" placeholder="Leave empty to keep current"
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                    <button type="button" @click="showEditModal = false" class="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium">
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal 3: Reset Password -->
+    <div x-show="showResetModal" x-cloak class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+        <div @click.away="showResetModal = false" class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl max-w-md w-full p-6 shadow-xl space-y-5">
+            <div class="flex justify-between items-center pb-3.5 border-b border-zinc-100 dark:border-zinc-800">
+                <div>
+                    <h3 class="font-display font-semibold text-base text-zinc-900 dark:text-white">Reset Password</h3>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Operator: <strong class="text-zinc-900 dark:text-white" x-text="targetUser ? targetUser.username : ''"></strong></p>
+                </div>
+                <button @click="showResetModal = false" class="text-zinc-400 hover:text-zinc-900 dark:hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <form @submit.prevent="resetPassword()" class="space-y-4 text-xs">
+                <div>
+                    <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">New Password</label>
+                    <input type="password" x-model="newPassword" required placeholder="Enter new password..."
+                        class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400">
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+                    <button type="button" @click="showResetModal = false" class="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium">
+                        Apply
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function usersApp() {
+    return {
+        users: [],
+        showCreateModal: false,
+        showEditModal: false,
+        showResetModal: false,
+        targetUser: null,
+        newPassword: '',
+        createForm: { username: '', email: '', password: '', role: 'admin' },
+        editForm: { id: null, username: '', email: '', password: '', role: 'admin' },
+
+        async init() { await this.loadUsers(); },
+        async loadUsers() {
+            try {
+                const res = await fetch('/api/users');
+                if (res.ok) this.users = await res.json();
+            } catch (err) { console.error("Failed to load users:", err); }
+        },
+        openCreateModal() {
+            this.createForm = { username: '', email: '', password: '', role: 'admin' };
+            this.showCreateModal = true;
+        },
+        openEditModal(user) {
+            this.editForm = { id: user.id, username: user.username, email: user.email, password: '', role: user.role };
+            this.showEditModal = true;
+        },
+        openResetModal(user) {
+            this.targetUser = user;
+            this.newPassword = '';
+            this.showResetModal = true;
+        },
+        async createUser() {
+            try {
+                const res = await fetch('/api/users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.createForm)
+                });
+                if (res.ok) { this.showCreateModal = false; await this.loadUsers(); }
+                else { const data = await res.json(); alert(data.detail || "Failed to create user"); }
+            } catch (err) { alert("Network error"); }
+        },
+        async updateUser() {
+            const payload = { username: this.editForm.username, email: this.editForm.email, role: this.editForm.role };
+            if (this.editForm.password && this.editForm.password.trim()) payload.password = this.editForm.password.trim();
+            try {
+                const res = await fetch(`/api/users/${this.editForm.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) { this.showEditModal = false; await this.loadUsers(); }
+                else { const data = await res.json(); alert(data.detail || "Failed to update user"); }
+            } catch (err) { alert("Network error"); }
+        },
+        async resetPassword() {
+            try {
+                const res = await fetch(`/api/users/${this.targetUser.id}/reset-password`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_password: this.newPassword })
+                });
+                if (res.ok) { alert(`Password for user '${this.targetUser.username}' updated!`); this.showResetModal = false; }
+                else { const data = await res.json(); alert(data.detail || "Failed to update password"); }
+            } catch (err) { alert("Network error"); }
+        },
+        async toggleStatus(user) {
+            try {
+                const res = await fetch(`/api/users/${user.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ is_active: !user.is_active })
+                });
+                if (res.ok) user.is_active = !user.is_active;
+            } catch (err) { console.error(err); }
+        },
+        async deleteUser(id) {
+            if (!confirm("Permanently delete this operator account?")) return;
+            try {
+                const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+                if (res.ok) await this.loadUsers();
+                else { const data = await res.json(); alert(data.detail || "Failed to delete user"); }
+            } catch (err) { alert("Network error"); }
+        }
+    }
+}
+</script>
+{{end}}
