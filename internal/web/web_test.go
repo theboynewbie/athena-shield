@@ -175,7 +175,7 @@ func TestFormatNICSpeed(t *testing.T) {
 
 func TestScanPCINetDevices(t *testing.T) {
 	dir := t.TempDir()
-	nicDir := filepath.Join(dir, "pci0000:00", "0000:00:1c.0", "0000:02:00.0", "net", "enp2s0")
+	nicDir := filepath.Join(dir, "pci0000_00", "0000_00_1c.0", "0000_02_00.0", "net", "enp2s0")
 	if err := os.MkdirAll(nicDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
