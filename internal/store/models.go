@@ -13,14 +13,17 @@ type User struct {
 }
 
 type Rule struct {
-	ID          int64     `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Pattern     string    `json:"pattern"`
-	Category    string    `json:"category"` // judi_slot, sqli, xss, path_traversal, bot_attack, custom
-	Action      string    `json:"action"`   // BLOCK, ALLOW
-	IsActive    bool      `json:"is_active"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`
+	Description   string    `json:"description"`
+	Pattern       string    `json:"pattern"`
+	Category      string    `json:"category"`       // judi_slot, sqli, xss, path_traversal, bot_attack, custom
+	Action        string    `json:"action"`         // BLOCK, MONITOR, ALLOW
+	Severity      string    `json:"severity"`       // CRITICAL, ERROR, WARNING, NOTICE
+	Score         int       `json:"score"`          // anomaly score weight (1..20)
+	ParanoiaLevel int       `json:"paranoia_level"` // 1..4
+	IsActive      bool      `json:"is_active"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 type IPList struct {

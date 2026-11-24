@@ -133,3 +133,137 @@ func TestIPListsCIDRAndMultipartUpload(t *testing.T) {
 		t.Fatalf("expected double-extension webshell upload to be blocked")
 	}
 }
+
+func TestAnomalyScoringParanoiaAndDryRun(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	host := &store.ProxyHost{DomainName: "kampus.ac.id", WAFEnabled: true, WAFMode: "active", AppProfile: "universal", IsActive: true}
+
+	// Add two score-3 rules at PL2 and one MONITOR rule at PL1
+	if err := s.CreateRule(&store.Rule{
+		Name: "Anomaly Part A", Pattern: `alpha_probe`, Category: "custom", Action: "BLOCK", Severity: "WARNING", Score: 3, ParanoiaLevel: 2, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRule(&store.Rule{
+		Name: "Anomaly Part B", Pattern: `beta_probe`, Category: "custom", Action: "BLOCK", Severity: "WARNING", Score: 3, ParanoiaLevel: 2, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRule(&store.Rule{
+		Name: "Shadow DryRun Rule", Pattern: `shadow_test_token`, Category: "custom", Action: "MONITOR", Severity: "CRITICAL", Score: 5, ParanoiaLevel: 1, IsActive: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng.Reload()
+
+	// 1. At PL1, PL2 rules must NOT fire
+	reqPL2 := makeReq("GET", "http://kampus.ac.id/?a=alpha_probe&b=beta_probe", "", nil, "")
+	if dec := eng.Inspect(reqPL2, host, nil); dec.Blocked {
+		t.Fatalf("expected PL2 rules to be skipped at PL1, got %+v", dec)
+	}
+
+	// 2. Shadow rule in MONITOR mode must not block, but must populate ShadowMatches
+	reqShadow := makeReq("GET", "http://kampus.ac.id/?q=shadow_test_token", "", nil, "")
+	decShadow := eng.Inspect(reqShadow, host, nil)
+	if decShadow.Blocked || len(decShadow.ShadowMatches) == 0 {
+		t.Fatalf("expected shadow match without block, got %+v", decShadow)
+	}
+
+	// 3. Raise Paranoia Level to 2
+	if err := s.UpdateSettings(map[string]string{"waf_paranoia_level": "2", "waf_anomaly_threshold": "5"}); err != nil {
+		t.Fatal(err)
+	}
+	eng.Reload()
+
+	// Single score-3 match < threshold 5 -> should NOT block
+	reqSingle := makeReq("GET", "http://kampus.ac.id/?a=alpha_probe", "", nil, "")
+	decSingle := eng.Inspect(reqSingle, host, nil)
+	if decSingle.Blocked || decSingle.AnomalyScore != 3 {
+		t.Fatalf("expected score 3 allowed (<5), got %+v", decSingle)
+	}
+
+	// Combined score 3+3=6 >= threshold 5 -> MUST block
+	decCombined := eng.Inspect(reqPL2, host, nil)
+	if !decCombined.Blocked || decCombined.AnomalyScore != 6 {
+		t.Fatalf("expected combined score 6 to block, got %+v", decCombined)
+	}
+}
+
+func TestDeepParserJSONGraphQLXML(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	_ = s.UpdateSettings(map[string]string{"waf_paranoia_level": "3"})
+	eng.Reload()
+	host := &store.ProxyHost{DomainName: "api.kampus.ac.id", WAFEnabled: true, WAFMode: "active", AppProfile: "universal", IsActive: true}
+
+	// Nested JSON with unicode-escaped XSS
+	jsonXSS := []byte(`{"user":{"profile":{"bio":"\u003cscript\u003ealert(1)\u003c/script\u003e"}}}`)
+	reqJSON := makeReq("POST", "http://api.kampus.ac.id/v1/profile", "", jsonXSS, "application/json")
+	if dec := eng.Inspect(reqJSON, host, jsonXSS); !dec.Blocked {
+		t.Fatalf("expected nested unicode-escaped JSON XSS to be blocked, got %+v", dec)
+	}
+
+	// Deeply nested JSON bomb (>16 levels)
+	deepJSON := []byte(`{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":{"a":"boom"}}}}}}}}}}}}}}}}}`)
+	reqBomb := makeReq("POST", "http://api.kampus.ac.id/v1/profile", "", deepJSON, "application/json")
+	if dec := eng.Inspect(reqBomb, host, deepJSON); !dec.Blocked || dec.Category != "Protocol Hardening" {
+		t.Fatalf("expected JSON nesting bomb to be blocked as Protocol Hardening, got %+v", dec)
+	}
+
+	// GraphQL introspection at PL3 scores +3 (blocks when combined or threshold <= 3)
+	gqlBody := []byte(`{"query":"query { __schema { types { name } } }"}`)
+	reqGQL := makeReq("POST", "http://api.kampus.ac.id/graphql", "", gqlBody, "application/json")
+	decGQL := eng.Inspect(reqGQL, host, gqlBody)
+	if decGQL.AnomalyScore < 3 || len(decGQL.MatchedRules) == 0 {
+		t.Fatalf("expected GraphQL introspection at PL3 to score >= 3, got %+v", decGQL)
+	}
+
+	// GraphQL nesting depth bomb (> 12 braces) blocked as Protocol Hardening
+	gqlBomb := []byte(`{"query":"query { a { b { c { d { e { f { g { h { i { j { k { l { m { id } } } } } } } } } } } } } }"}`)
+	reqGQLBomb := makeReq("POST", "http://api.kampus.ac.id/graphql", "", gqlBomb, "application/json")
+	if dec := eng.Inspect(reqGQLBomb, host, gqlBomb); !dec.Blocked || dec.Category != "Protocol Hardening" {
+		t.Fatalf("expected GraphQL nesting bomb to be blocked as Protocol Hardening, got %+v", dec)
+	}
+
+	// XML attribute payload
+	xmlBody := []byte(`<root><item attr="1 UNION SELECT 1,2,3">ok</item></root>`)
+	reqXML := makeReq("POST", "http://api.kampus.ac.id/xml", "", xmlBody, "application/xml")
+	if dec := eng.Inspect(reqXML, host, xmlBody); !dec.Blocked {
+		t.Fatalf("expected XML attribute SQLi to be blocked, got %+v", dec)
+	}
+}
+
+func TestResponseDLPAndDefacement(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	host := &store.ProxyHost{DomainName: "kampus.ac.id", WAFEnabled: true, WAFMode: "active", IsActive: true}
+
+	// SQL error leak
+	if dec := eng.InspectResponse(500, "text/html; charset=utf-8", []byte("Warning: You have an error in your SQL syntax near ''"), host); !dec.Blocked {
+		t.Fatalf("expected SQL error leak to be blocked")
+	}
+
+	// Private key leak
+	if dec := eng.InspectResponse(200, "text/plain", []byte("-----BEGIN RSA PRIVATE KEY-----\nMIIE..."), host); !dec.Blocked {
+		t.Fatalf("expected private key leak to be blocked")
+	}
+
+	// Luhn-valid Visa PAN blocked vs non-Luhn 16-digit ID allowed
+	if dec := eng.InspectResponse(200, "application/json", []byte(`{"card":"4111111111111111"}`), host); !dec.Blocked {
+		t.Fatalf("expected Luhn-valid card PAN to be blocked")
+	}
+	if dec := eng.InspectResponse(200, "application/json", []byte(`{"order_id":"4111111111111112"}`), host); dec.Blocked {
+		t.Fatalf("expected non-Luhn 16-digit number to pass, got %+v", dec)
+	}
+
+	// Defacement slot HTML
+	if dec := eng.InspectResponse(200, "text/html", []byte("<html><body>Promo Slot Gacor Maxwin</body></html>"), host); !dec.Blocked {
+		t.Fatalf("expected origin judi defacement HTML to be blocked")
+	}
+
+	// DLP monitor mode
+	_ = s.UpdateSettings(map[string]string{"waf_dlp_mode": "monitor"})
+	eng.Reload()
+	decMon := eng.InspectResponse(500, "text/html", []byte("SQLSTATE[42000]: Syntax error"), host)
+	if !decMon.Blocked || decMon.Mode != "monitor" {
+		t.Fatalf("expected DLP monitor decision, got %+v", decMon)
+	}
+}

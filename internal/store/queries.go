@@ -206,8 +206,47 @@ func (s *Store) DeleteProxyHost(id int64) (string, error) {
 
 // ---- Rules ----
 
+func NormalizeRuleFields(r *Rule) {
+	act := strings.ToUpper(strings.TrimSpace(r.Action))
+	if act != "BLOCK" && act != "MONITOR" && act != "ALLOW" {
+		act = "BLOCK"
+	}
+	r.Action = act
+
+	sev := strings.ToUpper(strings.TrimSpace(r.Severity))
+	switch sev {
+	case "CRITICAL", "ERROR", "WARNING", "NOTICE":
+	default:
+		sev = "CRITICAL"
+	}
+	r.Severity = sev
+
+	if r.Score <= 0 {
+		switch r.Severity {
+		case "CRITICAL":
+			r.Score = 5
+		case "ERROR":
+			r.Score = 4
+		case "WARNING":
+			r.Score = 3
+		case "NOTICE":
+			r.Score = 2
+		default:
+			r.Score = 5
+		}
+	} else if r.Score > 20 {
+		r.Score = 20
+	}
+
+	if r.ParanoiaLevel < 1 {
+		r.ParanoiaLevel = 1
+	} else if r.ParanoiaLevel > 4 {
+		r.ParanoiaLevel = 4
+	}
+}
+
 func (s *Store) ListRules() ([]Rule, error) {
-	rows, err := s.db.Query(`SELECT id, name, description, pattern, category, action, is_active, created_at FROM rules ORDER BY id DESC`)
+	rows, err := s.db.Query(`SELECT id, name, description, pattern, category, action, severity, score, paranoia_level, is_active, created_at FROM rules ORDER BY id DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -216,19 +255,21 @@ func (s *Store) ListRules() ([]Rule, error) {
 	for rows.Next() {
 		var r Rule
 		var act int
-		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &act, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &r.Severity, &r.Score, &r.ParanoiaLevel, &act, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		r.IsActive = act == 1
+		NormalizeRuleFields(&r)
 		out = append(out, r)
 	}
 	return out, nil
 }
 
 func (s *Store) CreateRule(r *Rule) error {
+	NormalizeRuleFields(r)
 	res, err := s.db.Exec(
-		`INSERT INTO rules (name, description, pattern, category, action, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		r.Name, r.Description, r.Pattern, r.Category, r.Action, boolToInt(r.IsActive), time.Now().UTC(),
+		`INSERT INTO rules (name, description, pattern, category, action, severity, score, paranoia_level, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.Name, r.Description, r.Pattern, r.Category, r.Action, r.Severity, r.Score, r.ParanoiaLevel, boolToInt(r.IsActive), time.Now().UTC(),
 	)
 	if err != nil {
 		return err
@@ -239,11 +280,11 @@ func (s *Store) CreateRule(r *Rule) error {
 	return nil
 }
 
-func (s *Store) UpdateRule(id int64, name, desc, pattern, category, action *string, isActive *bool) (*Rule, error) {
+func (s *Store) UpdateRule(id int64, name, desc, pattern, category, action, severity *string, score, paranoiaLevel *int, isActive *bool) (*Rule, error) {
 	var r Rule
 	var act int
-	err := s.db.QueryRow(`SELECT id, name, description, pattern, category, action, is_active, created_at FROM rules WHERE id = ?`, id).
-		Scan(&r.ID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &act, &r.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, name, description, pattern, category, action, severity, score, paranoia_level, is_active, created_at FROM rules WHERE id = ?`, id).
+		Scan(&r.ID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &r.Severity, &r.Score, &r.ParanoiaLevel, &act, &r.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -263,12 +304,22 @@ func (s *Store) UpdateRule(id int64, name, desc, pattern, category, action *stri
 	if action != nil {
 		r.Action = *action
 	}
+	if severity != nil {
+		r.Severity = *severity
+	}
+	if score != nil {
+		r.Score = *score
+	}
+	if paranoiaLevel != nil {
+		r.ParanoiaLevel = *paranoiaLevel
+	}
 	if isActive != nil {
 		r.IsActive = *isActive
 	}
+	NormalizeRuleFields(&r)
 	_, err = s.db.Exec(
-		`UPDATE rules SET name=?, description=?, pattern=?, category=?, action=?, is_active=? WHERE id=?`,
-		r.Name, r.Description, r.Pattern, r.Category, r.Action, boolToInt(r.IsActive), id,
+		`UPDATE rules SET name=?, description=?, pattern=?, category=?, action=?, severity=?, score=?, paranoia_level=?, is_active=? WHERE id=?`,
+		r.Name, r.Description, r.Pattern, r.Category, r.Action, r.Severity, r.Score, r.ParanoiaLevel, boolToInt(r.IsActive), id,
 	)
 	if err == nil {
 		s.BumpVersion()
@@ -643,6 +694,11 @@ func DefaultSettings() map[string]string {
 		"telegram_alert_upstream_down": "true",
 		"log_retention_clean_days":     cleanDays,
 		"log_retention_attack_days":    attackDays,
+		"waf_anomaly_threshold":        "5",
+		"waf_paranoia_level":           "1",
+		"waf_dlp_enabled":              "true",
+		"waf_dlp_mode":                 "block",
+		"waf_deep_parse_enabled":       "true",
 	}
 }
 
@@ -724,10 +780,11 @@ func (s *Store) UpsertProxyHostByDomain(h *ProxyHost) error {
 }
 
 func (s *Store) UpsertRuleByName(r *Rule) error {
+	NormalizeRuleFields(r)
 	var existingID int64
 	err := s.db.QueryRow(`SELECT id FROM rules WHERE name = ?`, r.Name).Scan(&existingID)
 	if err == nil {
-		_, err = s.UpdateRule(existingID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &r.IsActive)
+		_, err = s.UpdateRule(existingID, &r.Name, &r.Description, &r.Pattern, &r.Category, &r.Action, &r.Severity, &r.Score, &r.ParanoiaLevel, &r.IsActive)
 		return err
 	}
 	return s.CreateRule(r)

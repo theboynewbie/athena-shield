@@ -110,6 +110,9 @@ func (s *Store) migrate() error {
 			pattern TEXT NOT NULL,
 			category TEXT NOT NULL DEFAULT 'judi_slot',
 			action TEXT NOT NULL DEFAULT 'BLOCK',
+			severity TEXT NOT NULL DEFAULT 'CRITICAL',
+			score INTEGER NOT NULL DEFAULT 5,
+			paranoia_level INTEGER NOT NULL DEFAULT 1,
 			is_active INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
@@ -177,6 +180,15 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("migrate: %w", err)
 		}
 	}
+	// Additive migrations for existing databases
+	alterStmts := []string{
+		`ALTER TABLE rules ADD COLUMN severity TEXT NOT NULL DEFAULT 'CRITICAL'`,
+		`ALTER TABLE rules ADD COLUMN score INTEGER NOT NULL DEFAULT 5`,
+		`ALTER TABLE rules ADD COLUMN paranoia_level INTEGER NOT NULL DEFAULT 1`,
+	}
+	for _, q := range alterStmts {
+		_, _ = s.db.Exec(q)
+	}
 	return nil
 }
 
@@ -205,61 +217,98 @@ func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
 	}
 	if ruleCount == 0 {
 		defaultRules := []struct {
-			name, desc, cat, pat string
+			name, desc, cat, pat, sev string
+			score, pl                 int
 		}{
 			{
 				name: "Judi & Slot Gacor Spam Keywords",
 				desc: "Blokir kata kunci promosi judi online, slot gacor, togel, toto 4d, rtp live, maxwin, dan agen kasino",
 				cat:  "judi_slot",
 				pat:  `(slot[\s_-]*(?:gacor|online|resmi|thailand|kamboja|vietnam|jepang|dana|qris|pulsa|maxwin|terpercaya|hari[\s_-]*ini|malam[\s_-]*ini|anti[\s_-]*rungkad)|situs[\s_-]*(?:slot|judi|toto|togel|gacor)|judi[\s_-]*(?:online|bola|slot|togel|dadu|poker)|togel[\s_-]*(?:online|resmi|4d|hari[\s_-]*ini|singapore|hongkong|sydney)|bandar[\s_-]*(?:togel|toto|slot|judi|bola)|toto[\s_-]*(?:4d|slot|online|macau|gelap)|rtp[\s_-]*(?:slot|live|gacor|tinggi|hari[\s_-]*ini)|akun[\s_-]*(?:pro|vip|wso|gacor)|server[\s_-]*(?:thailand|kamboja|luar|vietnam|sensational)|maxwin|slot88|sbobet|pragmatic[\s_-]*play|pg[\s_-]*soft|habanero[\s_-]*slot|joker123|idn[\s_-]*poker|pkv[\s_-]*games|zeus[\s_-]*slot|gates[\s_-]*of[\s_-]*olympus|olympus[\s_-]*slot|starlight[\s_-]*princess|mahjong[\s_-]*ways|spaceman[\s_-]*slot|sweet[\s_-]*bonanza|kakek[\s_-]*zeus|scatter[\s_-]*hitam|link[\s_-]*(?:slot|gacor|alternatif[\s_-]*slot)|depo[\s_-]*(?:pulsa|dana|qris|5k|10k|20k|25k|murah)|bocoran[\s_-]*(?:slot|rtp|admin)|poker[\s_-]*online|kasino[\s_-]*online|live[\s_-]*casino|agen[\s_-]*(?:slot|togel|judi|bola)|jackpot[\s_-]*besar|gampang[\s_-]*(?:menang|maxwin|jp)|pola[\s_-]*(?:slot|gacor|maxwin)|free[\s_-]*spin[\s_-]*slot|bonus[\s_-]*new[\s_-]*member|garansi[\s_-]*kekalahan|menang[\s_-]*berapapun[\s_-]*dibayar|taruhan[\s_-]*bola|wd[\s_-]*cepat|mpo[\s_-]*slot|\bjudol\b)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "SQL Injection Advanced Deep Shield",
 				desc: "Deteksi percobaan SQLi UNION SELECT, boolean blind, benchmark, sleep, stacked queries",
 				cat:  "sqli",
 				pat:  `(\b(union(\s+all)?\s+select|select\s+(?:\*|[a-z0-9_,\s]+)\s+from\s+[a-z0-9_]+|insert\s+into\s+[a-z0-9_]+|delete\s+from\s+[a-z0-9_]+|drop\s+(table|database)\s+[a-z0-9_]+|exec(\s*\(|\s+xp_)|update\s+[a-z0-9_]+\s+set\s+[a-z0-9_]+\s*=|benchmark\s*\(|sleep\s*\(\s*\d+|waitfor\s+delay|information_schema|load_file\s*\(|into\s+(out|dump)file)\b|('|%27)\s*(or|and|\|\||&&)\s*('?[0-9a-zA-Z_]+'?\s*=\s*'?[0-9a-zA-Z_]+'|1\s*=\s*1|true)\b|('|%27)\s*(--|#|/\*)|/\*!\d+)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "Cross-Site Scripting (XSS) Patterns",
 				desc: "Deteksi script injection, javascript:, event handlers, SVG payload, DOM XSS",
 				cat:  "xss",
 				pat:  `(<\s*script[^>]*>.*<\s*/\s*script\s*>|<\s*script[^>]*>|javascript\s*:|onload\s*=|onerror\s*=|onclick\s*=|onmouseover\s*=|eval\s*\(\s*(?:atob|unescape|String\.fromCharCode|['"])|\balert\s*\(\s*(?:1\s*\)|document|['"]xss)|document\.cookie|<img[^>]+src=[^>]*onerror=|<svg[^>]+onload=|<iframe[^>]+src=|<body[^>]+onload=)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "Path Traversal & WordPress Sensitive Files",
 				desc: "Deteksi directory traversal seperti ../../etc/passwd, file .env, .git, sysconfig, wp-config.php, php://input",
 				cat:  "path_traversal",
 				pat:  `(\.\./|\.\.\\|%2e%2e%2f|%2e%2e/|\.\.%2f|%2e%2e%5c|etc/passwd|etc/shadow|boot\.ini|win\.ini|wp-config\.php\b|sysconfig\.(?:local\.)?inc\.php\b|/\.env\b|/\.git/|php://(input|filter)|phar://)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "Malicious Scanner & Bot User-Agents",
 				desc: "Deteksi scanner otomatis seperti Nikto, SQLmap, Acunetix, Masscan, DirBuster, WPScan",
 				cat:  "bot_attack",
 				pat:  `(sqlmap|nikto|acunetix|havij|nessus|masscan|dirbuster|nmap|zgrab|gobuster|wpscan|censys|shodan|python-requests/|curl/|libwww-perl)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "WordPress Webshell & Arbitrary File Upload",
 				desc: "Deteksi upload backdoor PHP/Webshell seperti c99, r57, WSO, eval(base64_decode), passthru, system",
 				cat:  "custom",
 				pat:  `(c99shell|r57shell|wso_version|eval\s*\(\s*(base64_decode|gzinflate|str_rot13)|passthru\s*\(|shell_exec\s*\(|system\s*\(\s*\$_)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "Aggressive AI & SEO Bot Crawlers (Anti-Scraping & Load Shield)",
 				desc: "Blokir bot crawler agresif pemicu beban tinggi (ClaudeBot, SemrushBot, AhrefsBot, GPTBot, Bytespider, MJ12bot) sambil mengizinkan Googlebot/Bingbot",
 				cat:  "bot_attack",
 				pat:  `(claudebot|claude-web|anthropic-ai|semrushbot|ahrefsbot|mj12bot|dotbot|blexbot|dataforseobot|bytespider|gptbot|ccbot|petalbot|barkrowler|seekportbot|meta-externalagent|diffbot|omgili|imagesiftbot)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
 				name: "Universal RCE, Log4Shell & Framework Exploit Shield",
 				desc: "Virtual patching lintas aplikasi (SLiMS, OJS, Laravel, Node, PHP): Log4Shell JNDI, Laravel Ignition RCE, PHPUnit RCE, SSRF Metadata, XXE, NoSQLi & backdoor shell",
 				cat:  "custom",
 				pat:  `(\$\{jndi:(?:ldap|ldaps|rmi|dns|nis|iiop|corba|nds)://|/_ignition/execute-solution|/vendor/phpunit/|allow_url_include\s*=|auto_prepend_file\s*=|b374k|indoxploit|alfa_shell|169\.254\.169\.254|metadata\.google\.internal|(?:gopher|dict|file)://|<!ENTITY\s+\w+\s+SYSTEM\b|\$(?:where|ne|gt|lt|regex)\b\s*:)`,
+				sev:  "CRITICAL", score: 5, pl: 1,
+			},
+			{
+				name: "SQLi Strict Heuristic (PL2)",
+				desc: "Heuristik SQL injection ketat (HAVING, GROUP BY, ORDER BY, CHAR/HEX, boolean numerik) untuk Paranoia Level 2+",
+				cat:  "sqli",
+				pat:  `(?:\b(?:having|group\s+by|order\s+by|concat_ws|group_concat|char\s*\(|hex\s*\()\b|\b(?:and|or)\s+\d+\s*=\s*\d+\b)`,
+				sev:  "WARNING", score: 3, pl: 2,
+			},
+			{
+				name: "XSS Strict Event & Protocol Heuristic (PL2)",
+				desc: "Heuristik XSS ketat (event handler HTML, data:text/html, vbscript, object/embed/base) untuk Paranoia Level 2+",
+				cat:  "xss",
+				pat:  `(\bon[a-z]{3,15}\s*=|data\s*:\s*text/html|vbscript\s*:|<\s*(?:object|embed|applet|meta|link|base)\b)`,
+				sev:  "WARNING", score: 3, pl: 2,
+			},
+			{
+				name: "Command Injection & Shell Metacharacters (PL3)",
+				desc: "Deteksi command injection shell metacharacters (;, ||, &&, backtick, subshell) dengan utilitas OS untuk Paranoia Level 3+",
+				cat:  "custom",
+				pat:  `(?:;|\|\||&&|\x60|\$\()\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh|python|perl|php)\b`,
+				sev:  "NOTICE", score: 2, pl: 3,
+			},
+			{
+				name: "GraphQL Introspection & Abuse Guard (PL3)",
+				desc: "Deteksi GraphQL schema introspection & abuse probing (__schema, __type, IntrospectionQuery) untuk Paranoia Level 3+",
+				cat:  "custom",
+				pat:  `(__schema|__type\s*\(|introspectionquery)`,
+				sev:  "WARNING", score: 3, pl: 3,
 			},
 		}
 		for _, r := range defaultRules {
 			_, err := s.db.Exec(
-				`INSERT INTO rules (name, description, pattern, category, action, is_active, created_at) VALUES (?, ?, ?, ?, 'BLOCK', 1, ?)`,
-				r.name, r.desc, r.pat, r.cat, time.Now().UTC(),
+				`INSERT INTO rules (name, description, pattern, category, action, severity, score, paranoia_level, is_active, created_at) VALUES (?, ?, ?, ?, 'BLOCK', ?, ?, ?, 1, ?)`,
+				r.name, r.desc, r.pat, r.cat, r.sev, r.score, r.pl, time.Now().UTC(),
 			)
 			if err != nil {
 				return err

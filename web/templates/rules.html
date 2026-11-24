@@ -62,7 +62,7 @@
                 <thead class="text-zinc-500 dark:text-zinc-400 bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800 font-medium text-[11px]">
                     <tr>
                         <th class="px-5 py-3 font-medium">Nama Rule</th>
-                        <th class="px-5 py-3 font-medium">Kategori</th>
+                        <th class="px-5 py-3 font-medium">Kategori & Level</th>
                         <th class="px-5 py-3 font-medium">Pola Regex</th>
                         <th class="px-5 py-3 font-medium">Status</th>
                         <th class="px-5 py-3 font-medium text-right">Aksi</th>
@@ -75,7 +75,16 @@
                                 <span x-text="rule.name" class="font-medium text-zinc-900 dark:text-white text-sm block"></span>
                                 <span x-text="rule.description || '-'" class="text-[11px] text-zinc-400 block mt-0.5"></span>
                             </td>
-                            <td class="px-5 py-3.5 text-zinc-600 dark:text-zinc-300" x-text="rule.category"></td>
+                            <td class="px-5 py-3.5 text-zinc-600 dark:text-zinc-300">
+                                <div class="font-medium" x-text="rule.category"></div>
+                                <div class="flex flex-wrap items-center gap-1 mt-1">
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300" x-text="'PL' + (rule.paranoia_level || 1)"></span>
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300" x-text="'+' + (rule.score || 5)"></span>
+                                    <span class="px-1.5 py-0.5 rounded text-[10px] font-medium"
+                                        :class="(rule.action || 'BLOCK') === 'MONITOR' ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300' : 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300'"
+                                        x-text="rule.action || 'BLOCK'"></span>
+                                </div>
+                            </td>
                             <td class="px-5 py-3.5 max-w-md">
                                 <div class="bg-zinc-50 dark:bg-zinc-900 p-2 rounded-lg border border-zinc-200/80 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 text-[11px] break-all max-h-20 overflow-y-auto">
                                     <code x-text="rule.pattern"></code>
@@ -144,7 +153,34 @@
                     <div>
                         <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Action</label>
                         <select x-model="form.action" class="w-full px-3 py-2 border rounded-lg text-xs">
-                            <option value="BLOCK">BLOCK (HTTP 403)</option>
+                            <option value="BLOCK">BLOCK (Score + Block)</option>
+                            <option value="MONITOR">MONITOR (Shadow / Dry-Run)</option>
+                            <option value="ALLOW">ALLOW (Disabled)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Severity</label>
+                        <select x-model="form.severity" class="w-full px-3 py-2 border rounded-lg text-xs">
+                            <option value="CRITICAL">CRITICAL</option>
+                            <option value="ERROR">ERROR</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="NOTICE">NOTICE</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Anomaly Score</label>
+                        <input type="number" min="1" max="20" x-model.number="form.score" class="w-full px-3 py-2 border rounded-lg text-xs tabular-nums">
+                    </div>
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1.5">Paranoia Level</label>
+                        <select x-model.number="form.paranoia_level" class="w-full px-3 py-2 border rounded-lg text-xs">
+                            <option :value="1">PL1 (Standard)</option>
+                            <option :value="2">PL2 (Strict)</option>
+                            <option :value="3">PL3 (High)</option>
+                            <option :value="4">PL4 (Extreme)</option>
                         </select>
                     </div>
                 </div>
@@ -194,6 +230,9 @@ function rulesApp() {
             pattern: '',
             description: '',
             action: 'BLOCK',
+            severity: 'CRITICAL',
+            score: 5,
+            paranoia_level: 1,
             is_active: true
         },
 
@@ -210,12 +249,12 @@ function rulesApp() {
         },
         openModal() {
             this.isEdit = false;
-            this.form = { id: null, name: '', category: 'judi_slot', pattern: '', description: '', action: 'BLOCK', is_active: true };
+            this.form = { id: null, name: '', category: 'judi_slot', pattern: '', description: '', action: 'BLOCK', severity: 'CRITICAL', score: 5, paranoia_level: 1, is_active: true };
             this.showModal = true;
         },
         editRule(rule) {
             this.isEdit = true;
-            this.form = { ...rule };
+            this.form = { severity: 'CRITICAL', score: 5, paranoia_level: 1, ...rule };
             this.showModal = true;
         },
         async saveRule() {

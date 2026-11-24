@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -78,27 +79,40 @@ var (
 )
 
 type compiledRule struct {
-	ID       int64
-	Name     string
-	Regex    *regexp.Regexp
-	Category string
-	IsJudi   bool
+	ID            int64
+	Name          string
+	Regex         *regexp.Regexp
+	Category      string
+	Action        string // BLOCK, MONITOR
+	Severity      string
+	Score         int
+	ParanoiaLevel int
+	IsJudi        bool
 }
 
 type snapshot struct {
-	rules         []compiledRule
-	whitelistIPs  map[string]bool
-	whitelistNets []*net.IPNet
-	blacklistIPs  map[string]bool
-	blacklistNets []*net.IPNet
+	rules            []compiledRule
+	whitelistIPs     map[string]bool
+	whitelistNets    []*net.IPNet
+	blacklistIPs     map[string]bool
+	blacklistNets    []*net.IPNet
+	anomalyThreshold int
+	paranoiaLevel    int
+	dlpEnabled       bool
+	dlpMode          string
+	deepParseEnabled bool
 }
 
 type Decision struct {
-	Blocked    bool
-	Reason     string
-	Category   string
-	RetryAfter int
-	Mode       string // active, monitor, bypass
+	Blocked       bool
+	Reason        string
+	Category      string
+	RetryAfter    int
+	Mode          string // active, monitor, bypass
+	AnomalyScore  int
+	Threshold     int
+	MatchedRules  []string
+	ShadowMatches []string
 }
 
 type Engine struct {
@@ -139,13 +153,36 @@ func (e *Engine) Reload() {
 		return
 	}
 	s := &snapshot{
-		whitelistIPs: make(map[string]bool),
-		blacklistIPs: make(map[string]bool),
+		whitelistIPs:     make(map[string]bool),
+		blacklistIPs:     make(map[string]bool),
+		anomalyThreshold: 5,
+		paranoiaLevel:    1,
+		dlpEnabled:       true,
+		dlpMode:          "block",
+		deepParseEnabled: true,
+	}
+
+	cfg := e.store.GetSettings()
+	if v, err := strconv.Atoi(cfg["waf_anomaly_threshold"]); err == nil && v >= 1 && v <= 50 {
+		s.anomalyThreshold = v
+	}
+	if v, err := strconv.Atoi(cfg["waf_paranoia_level"]); err == nil && v >= 1 && v <= 4 {
+		s.paranoiaLevel = v
+	}
+	if strings.EqualFold(cfg["waf_dlp_enabled"], "false") {
+		s.dlpEnabled = false
+	}
+	if strings.EqualFold(cfg["waf_dlp_mode"], "monitor") {
+		s.dlpMode = "monitor"
+	}
+	if strings.EqualFold(cfg["waf_deep_parse_enabled"], "false") {
+		s.deepParseEnabled = false
 	}
 
 	if rules, err := e.store.ListRules(); err == nil {
 		for _, r := range rules {
-			if !r.IsActive || !strings.EqualFold(r.Action, "BLOCK") {
+			act := strings.ToUpper(strings.TrimSpace(r.Action))
+			if !r.IsActive || (act != "BLOCK" && act != "MONITOR") {
 				continue
 			}
 			re, err := regexp.Compile("(?im)" + r.Pattern)
@@ -156,12 +193,24 @@ func (e *Engine) Reload() {
 			catLower := strings.ToLower(r.Category)
 			nameLower := strings.ToLower(r.Name)
 			isJudi := catLower == "judi_slot" || strings.Contains(nameLower, "judi") || strings.Contains(nameLower, "slot")
+			score := r.Score
+			if score <= 0 {
+				score = 5
+			}
+			pl := r.ParanoiaLevel
+			if pl < 1 {
+				pl = 1
+			}
 			s.rules = append(s.rules, compiledRule{
-				ID:       r.ID,
-				Name:     r.Name,
-				Regex:    re,
-				Category: r.Category,
-				IsJudi:   isJudi,
+				ID:            r.ID,
+				Name:          r.Name,
+				Regex:         re,
+				Category:      r.Category,
+				Action:        act,
+				Severity:      r.Severity,
+				Score:         score,
+				ParanoiaLevel: pl,
+				IsJudi:        isJudi,
 			})
 		}
 	}
@@ -320,11 +369,12 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 				}
 			}
 		}
-		blocked, reason, cat := e.scanTargets(snap, []targetPair{
+		dec := e.scanTargets(snap, []targetPair{
 			{Name: "URI Path", Value: r.URL.Path},
 			{Name: "Query Params", Value: rawQuery},
 		}, nil, !blockBadBots)
-		return Decision{Blocked: blocked, Reason: reason, Category: cat, Mode: wafMode}
+		dec.Mode = wafMode
+		return dec
 	}
 
 	// 5. Rate Limiting
@@ -482,12 +532,28 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 		{Name: "Request Body", Value: bodyText},
 	}
 
+	if snap.deepParseEnabled && len(bodyBytes) > 0 {
+		deepTargets, structViolation := ExtractDeepTargets(contentType, bodyBytes, e.cfg.MaxInspectBodyBytes)
+		if structViolation != "" {
+			return Decision{
+				Blocked:  true,
+				Reason:   structViolation,
+				Category: "Protocol Hardening",
+				Mode:     wafMode,
+			}
+		}
+		if len(deepTargets) > 0 {
+			targets = append(targets, deepTargets...)
+		}
+	}
+
 	var skipCats map[string]bool
 	if isAdminCode {
 		skipCats = adminExemptCategories
 	}
-	blocked, reason, cat := e.scanTargets(snap, targets, skipCats, !blockBadBots)
-	return Decision{Blocked: blocked, Reason: reason, Category: cat, Mode: wafMode}
+	dec := e.scanTargets(snap, targets, skipCats, !blockBadBots)
+	dec.Mode = wafMode
+	return dec
 }
 
 type targetPair struct {
@@ -495,24 +561,48 @@ type targetPair struct {
 	Value string
 }
 
-func (e *Engine) scanTargets(snap *snapshot, targets []targetPair, skipBodyCats map[string]bool, skipBadCrawler bool) (bool, string, string) {
+func isBodyTargetName(name string) bool {
+	return name == "Request Body" || name == "JSON Field" || name == "GraphQL Query" ||
+		name == "XML Field" || name == "Form Field" || name == "Multipart Field"
+}
+
+func (e *Engine) scanTargets(snap *snapshot, targets []targetPair, skipBodyCats map[string]bool, skipBadCrawler bool) Decision {
 	baseCache := make(map[int][]string)
 	deepCache := make(map[int][]string)
 
+	threshold := snap.anomalyThreshold
+	if threshold <= 0 {
+		threshold = 5
+	}
+	pl := snap.paranoiaLevel
+	if pl <= 0 {
+		pl = 1
+	}
+
+	totalScore := 0
+	var primaryReason, primaryCat string
+	var matchedRules, shadowMatches []string
+
 	for _, rule := range snap.rules {
+		if rule.ParanoiaLevel > pl {
+			continue
+		}
 		if skipBadCrawler && rule.Name == BadCrawlerRuleName {
 			continue
 		}
-		// Special handling for trusted curl/python-requests in default scanner rule
 		cache := baseCache
 		if rule.IsJudi {
 			cache = deepCache
 		}
+		ruleMatched := false
 		for idx, t := range targets {
+			if ruleMatched {
+				break
+			}
 			if t.Value == "" {
 				continue
 			}
-			if skipBodyCats != nil && t.Name == "Request Body" && skipBodyCats[strings.ToLower(rule.Category)] {
+			if skipBodyCats != nil && isBodyTargetName(t.Name) && skipBodyCats[strings.ToLower(rule.Category)] {
 				continue
 			}
 			variants, ok := cache[idx]
@@ -529,12 +619,52 @@ func (e *Engine) scanTargets(snap *snapshot, targets []targetPair, skipBodyCats 
 					if len(snippet) > 50 {
 						snippet = snippet[:50]
 					}
-					return true, fmt.Sprintf("Triggered [%s] in %s (match: '%s')", rule.Name, t.Name, snippet), rule.Category
+					ruleMatched = true
+					if rule.Action == "MONITOR" {
+						shadowMatches = append(shadowMatches, fmt.Sprintf("[%s] in %s (match: '%s')", rule.Name, t.Name, snippet))
+					} else {
+						score := rule.Score
+						if score <= 0 {
+							score = 5
+						}
+						totalScore += score
+						matchedRules = append(matchedRules, fmt.Sprintf("%s (+%d)", rule.Name, score))
+						if primaryReason == "" {
+							primaryReason = fmt.Sprintf("Triggered [%s] in %s (match: '%s')", rule.Name, t.Name, snippet)
+							primaryCat = rule.Category
+						}
+					}
+					break
 				}
 			}
 		}
 	}
-	return false, "", ""
+
+	if totalScore >= threshold {
+		reason := primaryReason
+		if len(matchedRules) > 1 {
+			reason = fmt.Sprintf("%s [Anomaly Score: %d/%d, Rules: %s]", primaryReason, totalScore, threshold, strings.Join(matchedRules, ", "))
+		} else if totalScore > 0 {
+			reason = fmt.Sprintf("%s [Score: %d/%d]", primaryReason, totalScore, threshold)
+		}
+		return Decision{
+			Blocked:       true,
+			Reason:        reason,
+			Category:      primaryCat,
+			AnomalyScore:  totalScore,
+			Threshold:     threshold,
+			MatchedRules:  matchedRules,
+			ShadowMatches: shadowMatches,
+		}
+	}
+
+	return Decision{
+		Blocked:       false,
+		AnomalyScore:  totalScore,
+		Threshold:     threshold,
+		MatchedRules:  matchedRules,
+		ShadowMatches: shadowMatches,
+	}
 }
 
 func multiSlashReLower(p string) string {

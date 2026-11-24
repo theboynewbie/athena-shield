@@ -346,12 +346,15 @@ func (sv *Server) apiListRules(w http.ResponseWriter, r *http.Request, user *sto
 
 func (sv *Server) apiCreateRule(w http.ResponseWriter, r *http.Request, user *store.User) {
 	var in struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Pattern     string `json:"pattern"`
-		Category    string `json:"category"`
-		Action      string `json:"action"`
-		IsActive    *bool  `json:"is_active"`
+		Name          string `json:"name"`
+		Description   string `json:"description"`
+		Pattern       string `json:"pattern"`
+		Category      string `json:"category"`
+		Action        string `json:"action"`
+		Severity      string `json:"severity"`
+		Score         int    `json:"score"`
+		ParanoiaLevel int    `json:"paranoia_level"`
+		IsActive      *bool  `json:"is_active"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeDetailError(w, 400, "Invalid JSON")
@@ -368,12 +371,15 @@ func (sv *Server) apiCreateRule(w http.ResponseWriter, r *http.Request, user *st
 		in.Action = "BLOCK"
 	}
 	rule := &store.Rule{
-		Name:        in.Name,
-		Description: in.Description,
-		Pattern:     in.Pattern,
-		Category:    in.Category,
-		Action:      in.Action,
-		IsActive:    in.IsActive == nil || *in.IsActive,
+		Name:          in.Name,
+		Description:   in.Description,
+		Pattern:       in.Pattern,
+		Category:      in.Category,
+		Action:        in.Action,
+		Severity:      in.Severity,
+		Score:         in.Score,
+		ParanoiaLevel: in.ParanoiaLevel,
+		IsActive:      in.IsActive == nil || *in.IsActive,
 	}
 	if err := sv.store.CreateRule(rule); err != nil {
 		writeDetailError(w, 400, err.Error())
@@ -389,12 +395,15 @@ func (sv *Server) apiUpdateRule(w http.ResponseWriter, r *http.Request, user *st
 		return
 	}
 	var in struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		Pattern     *string `json:"pattern"`
-		Category    *string `json:"category"`
-		Action      *string `json:"action"`
-		IsActive    *bool   `json:"is_active"`
+		Name          *string `json:"name"`
+		Description   *string `json:"description"`
+		Pattern       *string `json:"pattern"`
+		Category      *string `json:"category"`
+		Action        *string `json:"action"`
+		Severity      *string `json:"severity"`
+		Score         *int    `json:"score"`
+		ParanoiaLevel *int    `json:"paranoia_level"`
+		IsActive      *bool   `json:"is_active"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeDetailError(w, 400, "Invalid JSON")
@@ -406,7 +415,7 @@ func (sv *Server) apiUpdateRule(w http.ResponseWriter, r *http.Request, user *st
 			return
 		}
 	}
-	rule, err := sv.store.UpdateRule(id, in.Name, in.Description, in.Pattern, in.Category, in.Action, in.IsActive)
+	rule, err := sv.store.UpdateRule(id, in.Name, in.Description, in.Pattern, in.Category, in.Action, in.Severity, in.Score, in.ParanoiaLevel, in.IsActive)
 	if err != nil {
 		writeDetailError(w, 404, "Rule tidak ditemukan")
 		return
@@ -693,6 +702,18 @@ func (sv *Server) apiGetSettings(w http.ResponseWriter, r *http.Request, user *s
 	if atkDays < 1 {
 		atkDays = 60
 	}
+	anomalyThreshold, _ := strconv.Atoi(cfg["waf_anomaly_threshold"])
+	if anomalyThreshold < 1 {
+		anomalyThreshold = 5
+	}
+	paranoiaLevel, _ := strconv.Atoi(cfg["waf_paranoia_level"])
+	if paranoiaLevel < 1 || paranoiaLevel > 4 {
+		paranoiaLevel = 1
+	}
+	dlpMode := strings.ToLower(strings.TrimSpace(cfg["waf_dlp_mode"]))
+	if dlpMode != "monitor" {
+		dlpMode = "block"
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": map[string]any{
 			"telegram_enabled":             strings.ToLower(cfg["telegram_enabled"]) == "true",
@@ -704,6 +725,11 @@ func (sv *Server) apiGetSettings(w http.ResponseWriter, r *http.Request, user *s
 			"telegram_alert_upstream_down": strings.ToLower(cfg["telegram_alert_upstream_down"]) == "true",
 			"log_retention_clean_days":     cleanDays,
 			"log_retention_attack_days":    atkDays,
+			"waf_anomaly_threshold":        anomalyThreshold,
+			"waf_paranoia_level":           paranoiaLevel,
+			"waf_dlp_enabled":              strings.ToLower(cfg["waf_dlp_enabled"]) != "false",
+			"waf_dlp_mode":                 dlpMode,
+			"waf_deep_parse_enabled":       strings.ToLower(cfg["waf_deep_parse_enabled"]) != "false",
 		},
 		"storage": map[string]any{
 			"db_size_mb":            sv.store.DBSizeMB(),
@@ -734,15 +760,37 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 			}
 		case float64:
 			n := int(val)
-			if n < 1 {
-				n = 1
-			}
-			if n > 3650 {
-				n = 3650
+			switch k {
+			case "waf_paranoia_level":
+				if n < 1 {
+					n = 1
+				} else if n > 4 {
+					n = 4
+				}
+			case "waf_anomaly_threshold":
+				if n < 1 {
+					n = 1
+				} else if n > 50 {
+					n = 50
+				}
+			default:
+				if n < 1 {
+					n = 1
+				} else if n > 3650 {
+					n = 3650
+				}
 			}
 			updates[k] = strconv.Itoa(n)
 		case string:
-			updates[k] = strings.TrimSpace(val)
+			s := strings.TrimSpace(val)
+			if k == "waf_dlp_mode" {
+				if strings.EqualFold(s, "monitor") {
+					s = "monitor"
+				} else {
+					s = "block"
+				}
+			}
+			updates[k] = s
 		}
 	}
 	if err := sv.store.UpdateSettings(updates); err != nil {
@@ -896,13 +944,25 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 		if act == "" {
 			act = "BLOCK"
 		}
+		sev, _ := rm["severity"].(string)
+		score := 0
+		if v, ok := rm["score"].(float64); ok && v > 0 {
+			score = int(v)
+		}
+		pl := 1
+		if v, ok := rm["paranoia_level"].(float64); ok && v >= 1 {
+			pl = int(v)
+		}
 		if err := sv.store.UpsertRuleByName(&store.Rule{
-			Name:        strings.TrimSpace(rname),
-			Description: desc,
-			Pattern:     rpat,
-			Category:    strings.ToLower(cat),
-			Action:      strings.ToUpper(act),
-			IsActive:    getBoolMap(rm, "is_active", true),
+			Name:          strings.TrimSpace(rname),
+			Description:   desc,
+			Pattern:       rpat,
+			Category:      strings.ToLower(cat),
+			Action:        strings.ToUpper(act),
+			Severity:      strings.ToUpper(sev),
+			Score:         score,
+			ParanoiaLevel: pl,
+			IsActive:      getBoolMap(rm, "is_active", true),
 		}); err == nil {
 			impRules++
 		}

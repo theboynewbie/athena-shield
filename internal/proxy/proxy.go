@@ -293,6 +293,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	} else if len(dec.ShadowMatches) > 0 {
+		skipCleanLog = true
+		rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusOK, false, "[SHADOW] "+strings.Join(dec.ShadowMatches, "; "), ua, host.DomainName, cfCountry)
 	}
 
 	// Edge Cache: Static Assets (always active for clean static GET/HEAD) + Turbo HTML (when host.EdgeCacheEnabled)
@@ -321,6 +324,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			return
 		}
+	} else if len(dec.ShadowMatches) > 0 {
+		skipCleanLog = true
+		rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusOK, false, "[SHADOW] "+strings.Join(dec.ShadowMatches, "; "), ua, host.DomainName, cfCountry)
 	}
 
 	targetURL := ch.targetURL
@@ -358,22 +364,74 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if dec.Mode != "bypass" {
 				setSecurityHeaders(resp.Header)
 			}
-			if useEdgeCache && resp.StatusCode == http.StatusOK {
-				canCache := isStatic || strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/html")
-				if canCache {
-					body, readErr := io.ReadAll(io.LimitReader(resp.Body, cache.MaxEntryBytes+1))
-					_ = resp.Body.Close()
-					if readErr == nil && len(body) <= cache.MaxEntryBytes {
-						rt.edgeCache.Set(cacheKey, resp.StatusCode, resp.Header, body, isStatic)
-						resp.Header.Set("X-Athena-Cache", "MISS")
-						resp.Body = io.NopCloser(bytes.NewReader(body))
-						resp.ContentLength = int64(len(body))
-					} else {
-						resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), resp.Body))
+
+			ct := resp.Header.Get("Content-Type")
+			ce := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
+			needDLP := dec.Mode != "bypass" && (ce == "" || ce == "identity") && waf.IsDLPInspectableContentType(ct)
+			canCache := useEdgeCache && resp.StatusCode == http.StatusOK && (isStatic || strings.Contains(strings.ToLower(ct), "text/html"))
+
+			dlpBlocked := false
+			dlpMonitor := false
+			if needDLP || canCache {
+				bufLimit := cache.MaxEntryBytes
+				if waf.MaxDLPInspectBytes > bufLimit {
+					bufLimit = waf.MaxDLPInspectBytes
+				}
+				origBody := resp.Body
+				body, readErr := io.ReadAll(io.LimitReader(origBody, int64(bufLimit+1)))
+				fullRead := readErr == nil && len(body) <= bufLimit
+				if fullRead {
+					_ = origBody.Close()
+					resp.Body = io.NopCloser(bytes.NewReader(body))
+					resp.ContentLength = int64(len(body))
+				} else {
+					resp.Body = struct {
+						io.Reader
+						io.Closer
+					}{
+						Reader: io.MultiReader(bytes.NewReader(body), origBody),
+						Closer: origBody,
 					}
 				}
+
+				if needDLP && len(body) > 0 {
+					dlpDec := rt.engine.InspectResponse(resp.StatusCode, ct, body, &host)
+					if dlpDec.Blocked {
+						if dlpDec.Mode == "monitor" {
+							dlpMonitor = true
+							rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "[DLP-MONITOR] "+dlpDec.Reason, ua, host.DomainName, cfCountry)
+						} else {
+							dlpBlocked = true
+							rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusForbidden, true, dlpDec.Reason, ua, host.DomainName, cfCountry)
+							if rt.notifier != nil {
+								rt.notifier.Notify("attack", fmt.Sprintf("DLP Diblokir [%s]", dlpDec.Category), host.DomainName, clientIP, fullURI, dlpDec.Reason)
+							}
+							var safeBody []byte
+							if strings.Contains(strings.ToLower(ct), "json") {
+								resp.Header.Set("Content-Type", "application/json; charset=utf-8")
+								safeBody = []byte(`{"error":"Response blocked by Athena Shield DLP Policy","code":403}`)
+							} else {
+								resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+								safeBody = []byte(`<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>403 — Athena Shield DLP</h1><p>Response disembunyikan oleh kebijakan Data Loss Prevention.</p></div>`)
+							}
+							resp.StatusCode = http.StatusForbidden
+							resp.Status = "403 Forbidden"
+							resp.Header.Set("X-Athena-DLP", "BLOCKED")
+							resp.Body = io.NopCloser(bytes.NewReader(safeBody))
+							resp.ContentLength = int64(len(safeBody))
+							resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(safeBody)))
+							return nil
+						}
+					}
+				}
+
+				if !dlpBlocked && !dlpMonitor && canCache && readErr == nil && len(body) <= cache.MaxEntryBytes {
+					rt.edgeCache.Set(cacheKey, resp.StatusCode, resp.Header, body, isStatic)
+					resp.Header.Set("X-Athena-Cache", "MISS")
+				}
 			}
-			if !skipCleanLog && !isStatic {
+
+			if !skipCleanLog && !dlpMonitor && !isStatic {
 				rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "", ua, host.DomainName, cfCountry)
 			}
 			return nil
