@@ -42,6 +42,7 @@ func main() {
 	ec := cache.NewEdgeCache()
 	tlsMgr := proxy.NewTLSManager(cfg.DataDir, cfg.ACMEEmail)
 	rt := proxy.NewRouter(cfg, s, eng, rl, ec, notifier, tlsMgr, nil)
+	defer rt.Close()
 
 	s.SetOnChange(func() {
 		eng.Reload()

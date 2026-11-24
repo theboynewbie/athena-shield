@@ -38,8 +38,28 @@ func validateTargetURL(u string) (string, error) {
 	if clean == "" {
 		return "", nil
 	}
-	if forbiddenConfChar.MatchString(clean) || len(clean) > 255 {
-		return "", fmt.Errorf("URL target mengandung karakter ilegal.")
+	if len(clean) > 1024 {
+		return "", fmt.Errorf("URL target melebihi batas panjang maksimum.")
+	}
+	parts := strings.Split(clean, ",")
+	var out []string
+	for _, p := range parts {
+		seg := strings.TrimSpace(p)
+		if seg == "" || forbiddenConfChar.MatchString(seg) || len(seg) > 255 {
+			return "", fmt.Errorf("URL target mengandung karakter ilegal atau kosong.")
+		}
+		out = append(out, seg)
+	}
+	return strings.Join(out, ", "), nil
+}
+
+func validateSingleURL(u string) (string, error) {
+	clean := strings.TrimSpace(u)
+	if clean == "" {
+		return "", nil
+	}
+	if strings.Contains(clean, ",") || forbiddenConfChar.MatchString(clean) || len(clean) > 255 {
+		return "", fmt.Errorf("URL redirect mengandung karakter ilegal.")
 	}
 	return clean, nil
 }
@@ -90,7 +110,7 @@ func (sv *Server) apiCreateProxyHost(w http.ResponseWriter, r *http.Request, use
 	}
 	redir := ""
 	if in.RedirectURL != nil {
-		redir, err = validateTargetURL(*in.RedirectURL)
+		redir, err = validateSingleURL(*in.RedirectURL)
 		if err != nil {
 			writeDetailError(w, 400, err.Error())
 			return
@@ -200,7 +220,7 @@ func (sv *Server) apiUpdateProxyHost(w http.ResponseWriter, r *http.Request, use
 		h.TargetUpstream = up
 	}
 	if v, ok := in["redirect_url"].(string); ok {
-		ru, err := validateTargetURL(v)
+		ru, err := validateSingleURL(v)
 		if err != nil {
 			writeDetailError(w, 400, err.Error())
 			return

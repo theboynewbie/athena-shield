@@ -11,9 +11,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,7 +43,7 @@ type BlockPageData struct {
 
 type compiledHost struct {
 	store.ProxyHost
-	targetURL *url.URL
+	pool *UpstreamPool
 }
 
 type Router struct {
@@ -58,6 +58,8 @@ type Router struct {
 	transport *http.Transport
 
 	hostsSnap atomic.Pointer[map[string]compiledHost]
+	stopCh    chan struct{}
+	stopOnce  sync.Once
 }
 
 func NewRouter(
@@ -100,9 +102,54 @@ func NewRouter(
 		tlsMgr:    tm,
 		renderer:  renderer,
 		transport: tr,
+		stopCh:    make(chan struct{}),
 	}
 	rt.Reload()
+	go rt.healthCheckLoop()
 	return rt
+}
+
+func (rt *Router) Close() {
+	rt.stopOnce.Do(func() {
+		close(rt.stopCh)
+	})
+}
+
+func (rt *Router) healthCheckLoop() {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-rt.stopCh:
+			return
+		case <-ticker.C:
+			mPtr := rt.hostsSnap.Load()
+			if mPtr == nil {
+				continue
+			}
+			for _, ch := range *mPtr {
+				if ch.IsActive && ch.HostType != "redirect" && ch.pool != nil && ch.pool.Len() > 1 {
+					ch.pool.ProbeAll(2 * time.Second)
+				}
+			}
+		}
+	}
+}
+
+func (rt *Router) HealthStats() (hosts, healthyUpstreams, totalUpstreams int) {
+	mPtr := rt.hostsSnap.Load()
+	if mPtr == nil {
+		return 0, 0, 0
+	}
+	for _, ch := range *mPtr {
+		if ch.IsActive && ch.HostType != "redirect" && ch.pool != nil {
+			hosts++
+			h, t := ch.pool.HealthSummary()
+			healthyUpstreams += h
+			totalUpstreams += t
+		}
+	}
+	return hosts, healthyUpstreams, totalUpstreams
 }
 
 func (rt *Router) SetRenderer(r BlockRenderer) {
@@ -119,9 +166,9 @@ func (rt *Router) Reload() {
 	}
 	m := make(map[string]compiledHost, len(hosts))
 	for _, h := range hosts {
-		ch := compiledHost{ProxyHost: h}
-		if u, err := url.Parse(h.TargetUpstream); err == nil && u.Host != "" {
-			ch.targetURL = u
+		ch := compiledHost{
+			ProxyHost: h,
+			pool:      ParseUpstreamPool(h.TargetUpstream),
 		}
 		m[strings.ToLower(strings.TrimSpace(h.DomainName))] = ch
 	}
@@ -158,9 +205,10 @@ func (rt *Router) matchCompiledHost(r *http.Request) (compiledHost, bool) {
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
+		hostsCnt, hUp, tUp := rt.HealthStats()
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"ok","engine":"Athena Shield"}`))
+		_, _ = fmt.Fprintf(w, `{"status":"ok","engine":"Athena Shield","hosts":%d,"healthy_upstreams":%d,"total_upstreams":%d}`, hostsCnt, hUp, tUp)
 		return
 	}
 	ch, found := rt.matchCompiledHost(r)
@@ -364,10 +412,21 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusOK, false, "[SHADOW] "+strings.Join(dec.ShadowMatches, "; "), ua, host.DomainName, cfCountry)
 	}
 
-	targetURL := ch.targetURL
-	if targetURL == nil {
+	chosen := ch.pool.Next()
+	if chosen == nil || chosen.URL == nil {
 		http.Error(w, "Invalid upstream configuration", http.StatusBadGateway)
 		return
+	}
+	targetURL := chosen.URL
+
+	isWebSocket := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
+	isSSE := strings.Contains(strings.ToLower(r.Header.Get("Accept")), "text/event-stream")
+	isGRPC := strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "application/grpc")
+	isStreaming := isWebSocket || isSSE || isGRPC
+
+	flushInterval := 100 * time.Millisecond
+	if isStreaming {
+		flushInterval = -1
 	}
 
 	isHTTPS := r.TLS != nil || strings.EqualFold(proto, "https") || host.SSLType != "none"
@@ -380,7 +439,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	rp := &httputil.ReverseProxy{
 		Transport:     rt.transport,
-		FlushInterval: 100 * time.Millisecond,
+		FlushInterval: flushInterval,
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(targetURL)
 			pr.Out.Host = host.DomainName
@@ -393,6 +452,14 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if isHTTPS {
 				pr.Out.Header.Set("X-Forwarded-SSL", "on")
 			}
+			if isWebSocket {
+				pr.Out.Header.Set("Upgrade", pr.In.Header.Get("Upgrade"))
+				if connHdr := pr.In.Header.Get("Connection"); connHdr != "" {
+					pr.Out.Header.Set("Connection", connHdr)
+				} else {
+					pr.Out.Header.Set("Connection", "Upgrade")
+				}
+			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Alt-Svc")
@@ -400,10 +467,22 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				setSecurityHeaders(resp.Header)
 			}
 
+			if resp.StatusCode >= 500 && resp.StatusCode <= 504 && ch.pool.Len() > 1 {
+				chosen.MarkUnhealthy(15 * time.Second)
+			}
+
 			ct := resp.Header.Get("Content-Type")
+			ctLower := strings.ToLower(ct)
+			if isStreaming || resp.StatusCode == http.StatusSwitchingProtocols || strings.Contains(ctLower, "text/event-stream") || strings.HasPrefix(ctLower, "application/grpc") {
+				if !skipCleanLog && !isStatic {
+					rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "", ua, host.DomainName, cfCountry)
+				}
+				return nil
+			}
+
 			ce := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
 			needDLP := dec.Mode != "bypass" && (ce == "" || ce == "identity") && waf.IsDLPInspectableContentType(ct)
-			canCache := useEdgeCache && resp.StatusCode == http.StatusOK && (isStatic || strings.Contains(strings.ToLower(ct), "text/html"))
+			canCache := useEdgeCache && resp.StatusCode == http.StatusOK && (isStatic || strings.Contains(ctLower, "text/html"))
 
 			dlpBlocked := false
 			dlpMonitor := false
@@ -472,19 +551,22 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
+			if ch.pool.Len() > 1 {
+				chosen.MarkUnhealthy(15 * time.Second)
+			}
 			status := http.StatusBadGateway
 			kindTitle := "502 Bad Gateway — Backend Tidak Dapat Dihubungi"
 			if strings.Contains(strings.ToLower(proxyErr.Error()), "timeout") {
 				status = http.StatusGatewayTimeout
 				kindTitle = "504 Gateway Timeout — Backend Lambat / Hang"
 			}
-			rt.logEvent(clientIP, req.Method, req.URL.Path, status, false, fmt.Sprintf("Upstream Gateway Error: %v", proxyErr), ua, host.DomainName, cfCountry)
+			rt.logEvent(clientIP, req.Method, req.URL.Path, status, false, fmt.Sprintf("Upstream Gateway Error (%s): %v", chosen.Raw, proxyErr), ua, host.DomainName, cfCountry)
 			if rt.notifier != nil {
 				rt.notifier.Notify("upstream_down", kindTitle, host.DomainName, clientIP, req.URL.Path, proxyErr.Error())
 			}
 			rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 			rw.WriteHeader(status)
-			_, _ = fmt.Fprintf(rw, `<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>%d — Athena Shield</h1><p>Upstream <code>%s</code> error: %s</p></div>`, status, html.EscapeString(host.TargetUpstream), html.EscapeString(proxyErr.Error()))
+			_, _ = fmt.Fprintf(rw, `<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>%d — Athena Shield</h1><p>Upstream <code>%s</code> error: %s</p></div>`, status, html.EscapeString(chosen.Raw), html.EscapeString(proxyErr.Error()))
 		},
 	}
 
