@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -168,5 +170,24 @@ func TestFormatNICSpeed(t *testing.T) {
 		if got := formatNICSpeed(tc.mbps); got != tc.want {
 			t.Fatalf("formatNICSpeed(%d) = %q, want %q", tc.mbps, got, tc.want)
 		}
+	}
+}
+
+func TestScanPCINetDevices(t *testing.T) {
+	dir := t.TempDir()
+	nicDir := filepath.Join(dir, "pci0000:00", "0000:00:1c.0", "0000:02:00.0", "net", "enp2s0")
+	if err := os.MkdirAll(nicDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nicDir, "operstate"), []byte("up\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nicDir, "speed"), []byte("1000\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	name, label, mbps := scanPCINetDevices(dir)
+	if name != "enp2s0" || label != "1Gbps" || mbps != 1000 {
+		t.Fatalf("got (%q, %q, %d), want (\"enp2s0\", \"1Gbps\", 1000)", name, label, mbps)
 	}
 }

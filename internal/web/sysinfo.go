@@ -160,7 +160,91 @@ func scanSysClassNet(netDir string) (physName, physSpeedLabel string, physMbps i
 	return physName, physSpeedLabel, physMbps, fallbackUp
 }
 
+func scanPCINetDevices(devicesDir string) (physName, physSpeedLabel string, physMbps int) {
+	topEntries, err := os.ReadDir(devicesDir)
+	if err != nil {
+		return "", "", 0
+	}
+
+	var walk func(dir string, depth int)
+	walk = func(dir string, depth int) {
+		if depth > 5 {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				continue
+			}
+			name := ent.Name()
+			if name == "power" || name == "iommu" || name == "iommu_group" || name == "subsystem" || name == "driver" || name == "firmware_node" {
+				continue
+			}
+			full := filepath.Join(dir, name)
+			if name == "net" {
+				ifaces, err := os.ReadDir(full)
+				if err != nil {
+					continue
+				}
+				for _, iface := range ifaces {
+					in := iface.Name()
+					if isVirtualNICName(in) {
+						continue
+					}
+					ifaceDir := filepath.Join(full, in)
+					opBytes, err := os.ReadFile(filepath.Join(ifaceDir, "operstate"))
+					if err != nil {
+						continue
+					}
+					op := strings.TrimSpace(string(opBytes))
+					if op != "up" {
+						if op == "unknown" {
+							carBytes, err := os.ReadFile(filepath.Join(ifaceDir, "carrier"))
+							if err != nil || strings.TrimSpace(string(carBytes)) != "1" {
+								continue
+							}
+						} else {
+							continue
+						}
+					}
+					spBytes, err := os.ReadFile(filepath.Join(ifaceDir, "speed"))
+					if err != nil {
+						continue
+					}
+					mbps, err := strconv.Atoi(strings.TrimSpace(string(spBytes)))
+					if err != nil || mbps <= 0 {
+						continue
+					}
+					if mbps > physMbps {
+						physMbps = mbps
+						physName = in
+						physSpeedLabel = formatNICSpeed(mbps)
+					}
+				}
+				continue
+			}
+			walk(full, depth+1)
+		}
+	}
+
+	for _, ent := range topEntries {
+		if ent.IsDir() && strings.HasPrefix(ent.Name(), "pci") {
+			walk(filepath.Join(devicesDir, ent.Name()), 1)
+		}
+	}
+	return physName, physSpeedLabel, physMbps
+}
+
 func readLinuxNIC() (string, string, int) {
+	if name, label, mbps := scanPCINetDevices("/host/sys/devices"); name != "" {
+		return name, label, mbps
+	}
+	if name, label, mbps := scanPCINetDevices("/sys/devices"); name != "" {
+		return name, label, mbps
+	}
 	if name, label, mbps, _ := scanSysClassNet("/host/sys/class/net"); name != "" {
 		return name, label, mbps
 	}
