@@ -3,6 +3,7 @@ package ratelimit
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -31,22 +32,26 @@ type RateLimiter struct {
 	requests     map[string][]float64
 	loginReqs    map[string][]float64
 	loginHourly  map[string][]float64
+	endpointReqs map[string][]float64
 	violations   map[string][]float64
 	tempBanned   map[string]float64
+	apiMaxPerMin int
 	lastCleanup  float64
 }
 
 func New(cfg config.Config, s *store.Store, n *alert.Notifier) *RateLimiter {
 	rl := &RateLimiter{
-		cfg:         cfg,
-		store:       s,
-		notifier:    n,
-		requests:    make(map[string][]float64),
-		loginReqs:   make(map[string][]float64),
-		loginHourly: make(map[string][]float64),
-		violations:  make(map[string][]float64),
-		tempBanned:  make(map[string]float64),
-		lastCleanup: float64(time.Now().Unix()),
+		cfg:          cfg,
+		store:        s,
+		notifier:     n,
+		requests:     make(map[string][]float64),
+		loginReqs:    make(map[string][]float64),
+		loginHourly:  make(map[string][]float64),
+		endpointReqs: make(map[string][]float64),
+		violations:   make(map[string][]float64),
+		tempBanned:   make(map[string]float64),
+		apiMaxPerMin: 30,
+		lastCleanup:  float64(time.Now().Unix()),
 	}
 	if s != nil {
 		if bans, err := s.ActiveAutoBans(float64(time.Now().Unix())); err == nil {
@@ -54,8 +59,28 @@ func New(cfg config.Config, s *store.Store, n *alert.Notifier) *RateLimiter {
 				rl.tempBanned[b.IPAddress] = b.ExpiresAt
 			}
 		}
+		rl.Reload()
 	}
 	return rl
+}
+
+func (rl *RateLimiter) Reload() {
+	if rl.store == nil {
+		return
+	}
+	cfg := rl.store.GetSettings()
+	limit := 30
+	if v, err := strconv.Atoi(cfg["waf_api_rate_limit_max"]); err == nil {
+		if v < 5 {
+			v = 5
+		} else if v > 1000 {
+			v = 1000
+		}
+		limit = v
+	}
+	rl.mu.Lock()
+	rl.apiMaxPerMin = limit
+	rl.mu.Unlock()
 }
 
 func (rl *RateLimiter) cleanup(now float64) {
@@ -87,6 +112,14 @@ func (rl *RateLimiter) cleanup(now float64) {
 			delete(rl.loginHourly, ip)
 		} else {
 			rl.loginHourly[ip] = kept
+		}
+	}
+	for k, list := range rl.endpointReqs {
+		kept := filterAfter(list, cutLogin)
+		if len(kept) == 0 {
+			delete(rl.endpointReqs, k)
+		} else {
+			rl.endpointReqs[k] = kept
 		}
 	}
 	for ip, exp := range rl.tempBanned {
@@ -176,6 +209,12 @@ func (rl *RateLimiter) UnbanIP(ip string) bool {
 	delete(rl.loginReqs, ip)
 	delete(rl.loginHourly, ip)
 	delete(rl.requests, ip)
+	prefix := ip + "|"
+	for k := range rl.endpointReqs {
+		if strings.HasPrefix(k, prefix) {
+			delete(rl.endpointReqs, k)
+		}
+	}
 	rl.mu.Unlock()
 
 	if rl.store != nil && rl.store.DeleteAutoBan(ip) {
@@ -233,6 +272,9 @@ func (rl *RateLimiter) IsRateLimited(ip, path, method, query string) (bool, stri
 		strings.Contains(pathLower, "wp-signup.php") ||
 		pathLower == "/login" || pathLower == "/signin" || pathLower == "/auth/login" ||
 		pathLower == "/admin/login" || pathLower == "/user/login" || pathLower == "/login/signin" ||
+		strings.HasPrefix(pathLower, "/api/auth") || pathLower == "/oauth/token" ||
+		pathLower == "/api/login" || pathLower == "/api/register" ||
+		pathLower == "/reset-password" || pathLower == "/forgot-password" ||
 		strings.HasSuffix(pathLower, "/login") || strings.HasSuffix(pathLower, "/signin") || strings.HasSuffix(pathLower, "/login/signin") ||
 		strings.Contains(queryLower, "p=login") || strings.Contains(pathLower, "xmlrpc.php"))) ||
 		strings.Contains(pathLower, "xmlrpc.php")
@@ -256,6 +298,23 @@ func (rl *RateLimiter) IsRateLimited(ip, path, method, query string) (bool, stri
 		}
 		rl.loginReqs[ip] = append(rl.loginReqs[ip], now)
 		rl.loginHourly[ip] = append(rl.loginHourly[ip], now)
+	}
+
+	if strings.HasPrefix(pathLower, "/api/") {
+		epKey := ip + "|" + pathLower
+		rl.endpointReqs[epKey] = filterAfter(rl.endpointReqs[epKey], now-60)
+		epLimit := rl.apiMaxPerMin
+		if epLimit < 5 {
+			epLimit = 30
+		}
+		if geoip.IsTrustedRange(ip) {
+			epLimit *= 2
+		}
+		if len(rl.endpointReqs[epKey]) >= epLimit {
+			rl.mu.Unlock()
+			return true, fmt.Sprintf("Adaptive API Rate Limit: Exceeded %d req/min on %s", epLimit, pathLower), 60
+		}
+		rl.endpointReqs[epKey] = append(rl.endpointReqs[epKey], now)
 	}
 
 	maxReq := rl.cfg.RateLimitMaxReq

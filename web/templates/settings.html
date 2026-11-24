@@ -54,7 +54,8 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <!-- Telegram CSIRT -->
+        <!-- Left Column: Telegram CSIRT + Anti-Bot -->
+        <div class="space-y-5">
         <div class="dasher-card rounded-xl p-6 space-y-4">
             <div class="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
                 <div>
@@ -116,6 +117,56 @@
                     </button>
                 </div>
             </div>
+        </div>
+
+        <!-- Anti-Bot, JS Challenge & GeoIP -->
+        <div class="dasher-card rounded-xl p-6 space-y-4">
+            <div class="border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
+                <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Anti-Bot, JS Challenge &amp; GeoIP</h2>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Proof-of-Work Challenge, Bot Fingerprinting, Blokir Negara &amp; Rate Limit API</p>
+            </div>
+
+            <div class="space-y-3.5 text-xs">
+                <div class="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" x-model="form.waf_js_challenge_enabled" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                            <span class="text-zinc-700 dark:text-zinc-300 font-medium">JS Proof-of-Work Challenge (I'm Under Attack)</span>
+                        </label>
+                        <select x-model.number="form.waf_js_challenge_difficulty" class="px-2.5 py-1 border rounded-md text-[11px]">
+                            <option :value="12">12-bit (Cepat)</option>
+                            <option :value="14">14-bit (Standar)</option>
+                            <option :value="16">16-bit (Ketat)</option>
+                            <option :value="18">18-bit (Ekstrem)</option>
+                        </select>
+                    </div>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" x-model="form.waf_bot_fingerprint_enabled" class="w-4 h-4 rounded border-zinc-300 text-zinc-900">
+                        <span class="text-zinc-700 dark:text-zinc-300">Bot &amp; Headless Browser Fingerprinting</span>
+                    </label>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">Blokir Negara (ISO-2 CSV)</label>
+                        <input type="text" x-model="form.waf_geoip_blocked_countries" placeholder="Contoh: CN,RU,KP"
+                            class="w-full px-3 py-2 border rounded-lg uppercase">
+                    </div>
+                    <div>
+                        <label class="block text-zinc-700 dark:text-zinc-300 font-medium mb-1">API Rate Limit (Req/Menit/Endpoint)</label>
+                        <input type="number" min="5" max="1000" x-model.number="form.waf_api_rate_limit_max"
+                            class="w-full px-3 py-2 border rounded-lg tabular-nums">
+                    </div>
+                </div>
+
+                <div class="flex flex-wrap gap-2 pt-1">
+                    <button @click="saveAllSettings()" :disabled="saving"
+                        class="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        <span x-text="saving ? 'Menyimpan...' : 'Simpan Anti-Bot &amp; GeoIP'"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
         </div>
 
         <!-- Retention & Backup -->
@@ -248,7 +299,12 @@ function settingsApp() {
             waf_paranoia_level: 1,
             waf_dlp_enabled: true,
             waf_dlp_mode: 'block',
-            waf_deep_parse_enabled: true
+            waf_deep_parse_enabled: true,
+            waf_js_challenge_enabled: false,
+            waf_js_challenge_difficulty: 14,
+            waf_bot_fingerprint_enabled: true,
+            waf_geoip_blocked_countries: '',
+            waf_api_rate_limit_max: 30
         },
 
         notify(msg, isError = false) {

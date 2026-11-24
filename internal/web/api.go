@@ -714,6 +714,14 @@ func (sv *Server) apiGetSettings(w http.ResponseWriter, r *http.Request, user *s
 	if dlpMode != "monitor" {
 		dlpMode = "block"
 	}
+	jsDiff, _ := strconv.Atoi(cfg["waf_js_challenge_difficulty"])
+	if jsDiff < 12 || jsDiff > 20 {
+		jsDiff = 14
+	}
+	apiMax, _ := strconv.Atoi(cfg["waf_api_rate_limit_max"])
+	if apiMax < 5 || apiMax > 1000 {
+		apiMax = 30
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": map[string]any{
 			"telegram_enabled":             strings.ToLower(cfg["telegram_enabled"]) == "true",
@@ -730,6 +738,11 @@ func (sv *Server) apiGetSettings(w http.ResponseWriter, r *http.Request, user *s
 			"waf_dlp_enabled":              strings.ToLower(cfg["waf_dlp_enabled"]) != "false",
 			"waf_dlp_mode":                 dlpMode,
 			"waf_deep_parse_enabled":       strings.ToLower(cfg["waf_deep_parse_enabled"]) != "false",
+			"waf_js_challenge_enabled":     strings.ToLower(cfg["waf_js_challenge_enabled"]) == "true",
+			"waf_js_challenge_difficulty":  jsDiff,
+			"waf_bot_fingerprint_enabled":  strings.ToLower(cfg["waf_bot_fingerprint_enabled"]) != "false",
+			"waf_geoip_blocked_countries":  strings.ToUpper(strings.TrimSpace(cfg["waf_geoip_blocked_countries"])),
+			"waf_api_rate_limit_max":       apiMax,
 		},
 		"storage": map[string]any{
 			"db_size_mb":            sv.store.DBSizeMB(),
@@ -773,6 +786,18 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 				} else if n > 50 {
 					n = 50
 				}
+			case "waf_js_challenge_difficulty":
+				if n < 12 {
+					n = 12
+				} else if n > 20 {
+					n = 20
+				}
+			case "waf_api_rate_limit_max":
+				if n < 5 {
+					n = 5
+				} else if n > 1000 {
+					n = 1000
+				}
 			default:
 				if n < 1 {
 					n = 1
@@ -789,6 +814,15 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 				} else {
 					s = "block"
 				}
+			} else if k == "waf_geoip_blocked_countries" {
+				var clean []string
+				for _, part := range strings.Split(s, ",") {
+					cc := strings.ToUpper(strings.TrimSpace(part))
+					if len(cc) == 2 {
+						clean = append(clean, cc)
+					}
+				}
+				s = strings.Join(clean, ",")
 			}
 			updates[k] = s
 		}

@@ -2,6 +2,7 @@ package waf
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"log"
 	"net"
@@ -91,20 +92,25 @@ type compiledRule struct {
 }
 
 type snapshot struct {
-	rules            []compiledRule
-	whitelistIPs     map[string]bool
-	whitelistNets    []*net.IPNet
-	blacklistIPs     map[string]bool
-	blacklistNets    []*net.IPNet
-	anomalyThreshold int
-	paranoiaLevel    int
-	dlpEnabled       bool
-	dlpMode          string
-	deepParseEnabled bool
+	rules                 []compiledRule
+	whitelistIPs          map[string]bool
+	whitelistNets         []*net.IPNet
+	blacklistIPs          map[string]bool
+	blacklistNets         []*net.IPNet
+	anomalyThreshold      int
+	paranoiaLevel         int
+	dlpEnabled            bool
+	dlpMode               string
+	deepParseEnabled      bool
+	jsChallengeEnabled    bool
+	jsChallengeDifficulty int
+	botFingerprintEnabled bool
+	blockedCountries      map[string]bool
 }
 
 type Decision struct {
 	Blocked       bool
+	Challenge     bool
 	Reason        string
 	Category      string
 	RetryAfter    int
@@ -120,6 +126,7 @@ type Engine struct {
 	store       *store.Store
 	rateLimiter *ratelimit.RateLimiter
 	snap        atomic.Pointer[snapshot]
+	secret      []byte
 
 	adminCacheMu sync.Mutex
 	adminCache   map[string]adminCacheEntry
@@ -132,10 +139,18 @@ type adminCacheEntry struct {
 }
 
 func NewEngine(cfg config.Config, s *store.Store, rl *ratelimit.RateLimiter) *Engine {
+	var sec []byte
+	if s != nil {
+		sec = []byte(s.GetOrCreateSecret(cfg.SecretKey))
+	} else {
+		sec = make([]byte, 32)
+		_, _ = rand.Read(sec)
+	}
 	e := &Engine{
 		cfg:         cfg,
 		store:       s,
 		rateLimiter: rl,
+		secret:      sec,
 		adminCache:  make(map[string]adminCacheEntry),
 		verifyClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -153,13 +168,17 @@ func (e *Engine) Reload() {
 		return
 	}
 	s := &snapshot{
-		whitelistIPs:     make(map[string]bool),
-		blacklistIPs:     make(map[string]bool),
-		anomalyThreshold: 5,
-		paranoiaLevel:    1,
-		dlpEnabled:       true,
-		dlpMode:          "block",
-		deepParseEnabled: true,
+		whitelistIPs:          make(map[string]bool),
+		blacklistIPs:          make(map[string]bool),
+		anomalyThreshold:      5,
+		paranoiaLevel:         1,
+		dlpEnabled:            true,
+		dlpMode:               "block",
+		deepParseEnabled:      true,
+		jsChallengeEnabled:    false,
+		jsChallengeDifficulty: 14,
+		botFingerprintEnabled: true,
+		blockedCountries:      make(map[string]bool),
 	}
 
 	cfg := e.store.GetSettings()
@@ -177,6 +196,23 @@ func (e *Engine) Reload() {
 	}
 	if strings.EqualFold(cfg["waf_deep_parse_enabled"], "false") {
 		s.deepParseEnabled = false
+	}
+	if strings.EqualFold(cfg["waf_js_challenge_enabled"], "true") {
+		s.jsChallengeEnabled = true
+	}
+	if v, err := strconv.Atoi(cfg["waf_js_challenge_difficulty"]); err == nil && v >= 12 && v <= 20 {
+		s.jsChallengeDifficulty = v
+	}
+	if strings.EqualFold(cfg["waf_bot_fingerprint_enabled"], "false") {
+		s.botFingerprintEnabled = false
+	}
+	if rawCC := strings.TrimSpace(cfg["waf_geoip_blocked_countries"]); rawCC != "" {
+		for _, part := range strings.Split(rawCC, ",") {
+			cc := strings.ToUpper(strings.TrimSpace(part))
+			if len(cc) == 2 {
+				s.blockedCountries[cc] = true
+			}
+		}
 	}
 
 	if rules, err := e.store.ListRules(); err == nil {
@@ -342,6 +378,19 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 		}
 	}
 
+	// 2b. GeoIP Country Block
+	if len(snap.blockedCountries) > 0 {
+		cc, _ := geoip.Resolve(clientIP, r.Header.Get("CF-IPCountry"), false)
+		if snap.blockedCountries[cc] {
+			return Decision{
+				Blocked:  true,
+				Reason:   fmt.Sprintf("GeoIP Shield: Traffic from country %s blocked", cc),
+				Category: "GeoIP Block",
+				Mode:     wafMode,
+			}
+		}
+	}
+
 	// 3. Bad Bots
 	uaRaw := r.Header.Get("User-Agent")
 	if blockBadBots && uaRaw != "" {
@@ -352,6 +401,38 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 				Category: "bot_attack",
 				Mode:     wafMode,
 			}
+		}
+	}
+
+	// 3b. Bot Fingerprinting
+	if blockBadBots && snap.botFingerprintEnabled && !IsVerifiedGoodBot(uaRaw) {
+		if susp, _, botReason := AnalyzeBotFingerprint(r); susp && !e.HasValidClearance(r, clientIP) {
+			if snap.jsChallengeEnabled {
+				return Decision{
+					Blocked:   true,
+					Challenge: true,
+					Reason:    botReason,
+					Category:  "Bot Challenge",
+					Mode:      wafMode,
+				}
+			}
+			return Decision{
+				Blocked:  true,
+				Reason:   botReason,
+				Category: "bot_attack",
+				Mode:     wafMode,
+			}
+		}
+	}
+
+	// 3c. Global JS PoW Challenge Mode (for non-static GET requests without valid clearance)
+	if snap.jsChallengeEnabled && r.Method == http.MethodGet && !IsStaticAssetPath(r.URL.Path) && !IsVerifiedGoodBot(uaRaw) && !e.HasValidClearance(r, clientIP) {
+		return Decision{
+			Blocked:   true,
+			Challenge: true,
+			Reason:    "JS Proof-of-Work Challenge required",
+			Category:  "JS Challenge",
+			Mode:      wafMode,
 		}
 	}
 

@@ -2,6 +2,7 @@ package waf
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -265,5 +266,84 @@ func TestResponseDLPAndDefacement(t *testing.T) {
 	decMon := eng.InspectResponse(500, "text/html", []byte("SQLSTATE[42000]: Syntax error"), host)
 	if !decMon.Blocked || decMon.Mode != "monitor" {
 		t.Fatalf("expected DLP monitor decision, got %+v", decMon)
+	}
+}
+
+func TestJSChallengePoWAndClearance(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	_ = s.UpdateSettings(map[string]string{"waf_js_challenge_enabled": "true", "waf_js_challenge_difficulty": "12"})
+	eng.Reload()
+
+	host := &store.ProxyHost{DomainName: "kampus.ac.id", WAFEnabled: true, WAFMode: "active", BlockBadBots: true, IsActive: true}
+	req := makeReq("GET", "http://kampus.ac.id/portal", "Mozilla/5.0", nil, "")
+
+	// Without clearance cookie, should trigger Challenge
+	dec := eng.Inspect(req, host, nil)
+	if !dec.Blocked || !dec.Challenge {
+		t.Fatalf("expected JS challenge for unverified GET, got %+v", dec)
+	}
+
+	// Solve PoW
+	diff := eng.ChallengeDifficulty()
+	nonce, exp, sig := eng.CreateChallenge("203.0.113.50", "Mozilla/5.0", diff)
+	sol := ""
+	for i := 0; i < 100000; i++ {
+		cand := fmt.Sprintf("%d", i)
+		if eng.VerifyPoW(nonce, exp, sig, cand, "203.0.113.50", "Mozilla/5.0", diff) {
+			sol = cand
+			break
+		}
+	}
+	if sol == "" {
+		t.Fatalf("failed to solve %d-bit PoW within 100k iterations", diff)
+	}
+
+	// Issue clearance cookie and verify access
+	cookie := eng.IssueClearanceCookie("203.0.113.50", "Mozilla/5.0", true)
+	req.AddCookie(cookie)
+	if dec2 := eng.Inspect(req, host, nil); dec2.Blocked {
+		t.Fatalf("expected request with valid clearance cookie to pass, got %+v", dec2)
+	}
+
+	// Different IP with same cookie should fail clearance
+	reqOtherIP := makeReq("GET", "http://kampus.ac.id/portal", "Mozilla/5.0", nil, "")
+	reqOtherIP.RemoteAddr = "203.0.113.99:4444"
+	reqOtherIP.AddCookie(cookie)
+	if dec3 := eng.Inspect(reqOtherIP, host, nil); !dec3.Challenge {
+		t.Fatalf("expected clearance cookie bound to original IP to fail on different IP, got %+v", dec3)
+	}
+}
+
+func TestBotFingerprintAndGeoIPBlock(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	host := &store.ProxyHost{DomainName: "kampus.ac.id", WAFEnabled: true, WAFMode: "active", BlockBadBots: true, IsActive: true}
+
+	// HeadlessChrome blocked
+	reqHeadless := makeReq("GET", "http://kampus.ac.id/", "Mozilla/5.0 HeadlessChrome/120.0.0.0", nil, "")
+	if dec := eng.Inspect(reqHeadless, host, nil); !dec.Blocked {
+		t.Fatalf("expected HeadlessChrome to be blocked")
+	}
+
+	// Modern Chrome UA over HTTP/1.0 blocked
+	reqSpoof := makeReq("GET", "http://kampus.ac.id/", "Mozilla/5.0 Chrome/124.0.0.0", nil, "")
+	reqSpoof.ProtoMajor = 1
+	reqSpoof.ProtoMinor = 0
+	if dec := eng.Inspect(reqSpoof, host, nil); !dec.Blocked {
+		t.Fatalf("expected Chrome UA over HTTP/1.0 to be blocked")
+	}
+
+	// Verified Googlebot allowed
+	reqGoogle := makeReq("GET", "http://kampus.ac.id/", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)", nil, "")
+	if dec := eng.Inspect(reqGoogle, host, nil); dec.Blocked {
+		t.Fatalf("expected Googlebot to pass, got %+v", dec)
+	}
+
+	// GeoIP country block
+	_ = s.UpdateSettings(map[string]string{"waf_geoip_blocked_countries": "KP,RU"})
+	eng.Reload()
+	reqKP := makeReq("GET", "http://kampus.ac.id/", "Mozilla/5.0", nil, "")
+	reqKP.Header.Set("CF-IPCountry", "KP")
+	if dec := eng.Inspect(reqKP, host, nil); !dec.Blocked || dec.Category != "GeoIP Block" {
+		t.Fatalf("expected KP country to be blocked by GeoIP Shield, got %+v", dec)
 	}
 }

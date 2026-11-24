@@ -699,6 +699,11 @@ func DefaultSettings() map[string]string {
 		"waf_dlp_enabled":              "true",
 		"waf_dlp_mode":                 "block",
 		"waf_deep_parse_enabled":       "true",
+		"waf_js_challenge_enabled":     "false",
+		"waf_js_challenge_difficulty":  "14",
+		"waf_bot_fingerprint_enabled":  "true",
+		"waf_geoip_blocked_countries":  "",
+		"waf_api_rate_limit_max":       "30",
 	}
 }
 

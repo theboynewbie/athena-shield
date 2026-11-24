@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -223,6 +224,30 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cfCountry := r.Header.Get("CF-IPCountry")
 	fullURI := r.URL.RequestURI()
 
+	// JS Proof-of-Work Challenge Verification Endpoint
+	if r.URL.Path == waf.ChallengeVerifyPath && r.Method == http.MethodPost {
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		if err := r.ParseForm(); err == nil {
+			nonce := r.FormValue("nonce")
+			expStr := r.FormValue("expires")
+			sig := r.FormValue("sig")
+			solution := r.FormValue("solution")
+			redir := r.FormValue("redirect")
+			exp, err := strconv.ParseInt(expStr, 10, 64)
+			if err == nil && rt.engine.VerifyPoW(nonce, exp, sig, solution, clientIP, ua, rt.engine.ChallengeDifficulty()) {
+				isHTTPS := r.TLS != nil || strings.EqualFold(proto, "https")
+				http.SetCookie(w, rt.engine.IssueClearanceCookie(clientIP, ua, isHTTPS))
+				if !strings.HasPrefix(redir, "/") || strings.HasPrefix(redir, "//") || strings.HasPrefix(redir, `/\`) {
+					redir = "/"
+				}
+				http.Redirect(w, r, redir, http.StatusFound)
+				return
+			}
+		}
+		http.Error(w, "Athena Shield: Challenge verification failed", http.StatusForbidden)
+		return
+	}
+
 	// Only read body if request actually has a payload (skip allocation on GET/HEAD/OPTIONS)
 	var bodyBytes []byte
 	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && r.ContentLength != 0 {
@@ -251,6 +276,16 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if rt.notifier != nil && dec.Category != "Rate Limiting" && dec.Category != "bot_attack" {
 				rt.notifier.Notify("monitor", fmt.Sprintf("Deteksi Mode Monitor [%s]", dec.Category), host.DomainName, clientIP, fullURI, dec.Reason)
 			}
+		} else if dec.Challenge {
+			diff := rt.engine.ChallengeDifficulty()
+			nonce, exp, sig := rt.engine.CreateChallenge(clientIP, ua, diff)
+			rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusServiceUnavailable, false, "[CHALLENGE] "+dec.Reason, ua, host.DomainName, cfCountry)
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
+			w.Header().Set("X-Protected-By", "Athena-Shield-v1.5")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(waf.RenderChallengeHTML(host.DomainName, nonce, exp, sig, diff, fullURI)))
+			return
 		} else {
 			statusCode := http.StatusForbidden
 			if dec.Category == "Rate Limiting" {

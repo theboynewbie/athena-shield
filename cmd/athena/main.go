@@ -45,6 +45,7 @@ func main() {
 
 	s.SetOnChange(func() {
 		eng.Reload()
+		rl.Reload()
 		rt.Reload()
 	})
 
