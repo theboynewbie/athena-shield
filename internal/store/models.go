@@ -7,9 +7,22 @@ type User struct {
 	Username       string    `json:"username"`
 	Email          string    `json:"email"`
 	HashedPassword string    `json:"-"`
-	Role           string    `json:"role"` // "super_admin" or "admin"
+	Role           string    `json:"role"` // "super_admin", "admin", "auditor"
+	TOTPSecret     string    `json:"-"`
+	TOTPEnabled    bool      `json:"totp_enabled"`
 	IsActive       bool      `json:"is_active"`
 	CreatedAt      time.Time `json:"created_at"`
+}
+
+type AuditLog struct {
+	ID        int64     `json:"id"`
+	Timestamp time.Time `json:"timestamp"`
+	Actor     string    `json:"actor"`
+	Role      string    `json:"role"`
+	Action    string    `json:"action"`
+	Target    string    `json:"target"`
+	Details   string    `json:"details"`
+	ClientIP  string    `json:"client_ip"`
 }
 
 type Rule struct {

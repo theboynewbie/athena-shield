@@ -129,6 +129,7 @@ func (sv *Server) registerRoutes() {
 	sv.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "engine": "Athena Shield"})
 	})
+	sv.mux.HandleFunc("GET /metrics", sv.handleMetrics)
 
 	sv.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
@@ -146,27 +147,34 @@ func (sv *Server) registerRoutes() {
 
 	// JSON API
 	sv.mux.HandleFunc("GET /api/proxy-hosts", sv.requireAuthAPI(sv.apiListProxyHosts))
-	sv.mux.HandleFunc("POST /api/proxy-hosts", sv.requireAuthAPI(sv.apiCreateProxyHost))
-	sv.mux.HandleFunc("PUT /api/proxy-hosts/{id}", sv.requireAuthAPI(sv.apiUpdateProxyHost))
-	sv.mux.HandleFunc("DELETE /api/proxy-hosts/{id}", sv.requireAuthAPI(sv.apiDeleteProxyHost))
+	sv.mux.HandleFunc("POST /api/proxy-hosts", sv.requireWriteAPI(sv.apiCreateProxyHost))
+	sv.mux.HandleFunc("PUT /api/proxy-hosts/{id}", sv.requireWriteAPI(sv.apiUpdateProxyHost))
+	sv.mux.HandleFunc("DELETE /api/proxy-hosts/{id}", sv.requireWriteAPI(sv.apiDeleteProxyHost))
 
 	sv.mux.HandleFunc("GET /api/stats", sv.requireAuthAPI(sv.apiStats))
 
 	sv.mux.HandleFunc("GET /api/rules", sv.requireAuthAPI(sv.apiListRules))
-	sv.mux.HandleFunc("POST /api/rules", sv.requireAuthAPI(sv.apiCreateRule))
-	sv.mux.HandleFunc("PUT /api/rules/{id}", sv.requireAuthAPI(sv.apiUpdateRule))
-	sv.mux.HandleFunc("DELETE /api/rules/{id}", sv.requireAuthAPI(sv.apiDeleteRule))
+	sv.mux.HandleFunc("POST /api/rules", sv.requireWriteAPI(sv.apiCreateRule))
+	sv.mux.HandleFunc("PUT /api/rules/{id}", sv.requireWriteAPI(sv.apiUpdateRule))
+	sv.mux.HandleFunc("DELETE /api/rules/{id}", sv.requireWriteAPI(sv.apiDeleteRule))
 
 	sv.mux.HandleFunc("GET /api/ips", sv.requireAuthAPI(sv.apiListIPs))
-	sv.mux.HandleFunc("POST /api/ips", sv.requireAuthAPI(sv.apiAddIP))
-	sv.mux.HandleFunc("DELETE /api/ips/{id}", sv.requireAuthAPI(sv.apiDeleteIP))
+	sv.mux.HandleFunc("POST /api/ips", sv.requireWriteAPI(sv.apiAddIP))
+	sv.mux.HandleFunc("DELETE /api/ips/{id}", sv.requireWriteAPI(sv.apiDeleteIP))
 
 	sv.mux.HandleFunc("GET /api/logs", sv.requireAuthAPI(sv.apiGetLogs))
+	sv.mux.HandleFunc("GET /api/logs/export", sv.requireAuthAPI(sv.apiExportLogsSIEM))
 	sv.mux.HandleFunc("DELETE /api/logs/clear", sv.requireSuperAdminAPI(sv.apiClearLogs))
 
+	sv.mux.HandleFunc("GET /api/audit-logs", sv.requireAuthAPI(sv.apiListAuditLogs))
+	sv.mux.HandleFunc("GET /api/account/2fa/status", sv.requireAuthAPI(sv.api2FAStatus))
+	sv.mux.HandleFunc("POST /api/account/2fa/setup", sv.requireAuthAPI(sv.api2FASetup))
+	sv.mux.HandleFunc("POST /api/account/2fa/verify", sv.requireAuthAPI(sv.api2FAVerify))
+	sv.mux.HandleFunc("POST /api/account/2fa/disable", sv.requireAuthAPI(sv.api2FADisable))
+
 	sv.mux.HandleFunc("GET /api/banned-ips", sv.requireAuthAPI(sv.apiBannedIPs))
-	sv.mux.HandleFunc("POST /api/unban-ip", sv.requireAuthAPI(sv.apiUnbanIP))
-	sv.mux.HandleFunc("POST /api/cache/purge", sv.requireAuthAPI(sv.apiPurgeCache))
+	sv.mux.HandleFunc("POST /api/unban-ip", sv.requireWriteAPI(sv.apiUnbanIP))
+	sv.mux.HandleFunc("POST /api/cache/purge", sv.requireWriteAPI(sv.apiPurgeCache))
 
 	sv.mux.HandleFunc("GET /api/users", sv.requireSuperAdminAPI(sv.apiListUsers))
 	sv.mux.HandleFunc("POST /api/users", sv.requireSuperAdminAPI(sv.apiCreateUser))
@@ -213,6 +221,16 @@ func (sv *Server) requireAuthAPI(next authedHandler) http.HandlerFunc {
 		}
 		next(w, r, u)
 	}
+}
+
+func (sv *Server) requireWriteAPI(next authedHandler) http.HandlerFunc {
+	return sv.requireAuthAPI(func(w http.ResponseWriter, r *http.Request, u *store.User) {
+		if strings.EqualFold(u.Role, "auditor") {
+			writeDetailError(w, http.StatusForbidden, "Read-Only Auditor tidak diizinkan mengubah konfigurasi.")
+			return
+		}
+		next(w, r, u)
+	})
 }
 
 func (sv *Server) requireSuperAdminAPI(next authedHandler) http.HandlerFunc {
@@ -352,6 +370,17 @@ func (sv *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 			CSRFToken: sv.auth.GenerateCSRF(clientIP),
 		})
 		return
+	}
+
+	if u.TOTPEnabled && u.TOTPSecret != "" {
+		totpCode := strings.TrimSpace(r.FormValue("totp_code"))
+		if !auth.VerifyTOTP(u.TOTPSecret, totpCode, time.Now()) {
+			sv.renderPage(w, "login.html", http.StatusUnauthorized, pageData{
+				Error:     "Kode 2FA Authenticator wajib diisi dan harus valid (6 digit).",
+				CSRFToken: sv.auth.GenerateCSRF(clientIP),
+			})
+			return
+		}
 	}
 
 	sv.auth.ClearLoginFailures(clientIP, username)

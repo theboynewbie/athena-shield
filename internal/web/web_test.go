@@ -108,4 +108,43 @@ func TestLoginPageAndAuthFlow(t *testing.T) {
 	if recViewer.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for non-super_admin on /api/users, got %d", recViewer.Code)
 	}
+
+	// 6. Prometheus /metrics returns 200 with expected gauges
+	reqMet := httptest.NewRequest("GET", "/metrics", nil)
+	recMet := httptest.NewRecorder()
+	h.ServeHTTP(recMet, reqMet)
+	if recMet.Code != http.StatusOK || !strings.Contains(recMet.Body.String(), "athena_requests_total") || !strings.Contains(recMet.Body.String(), "athena_go_goroutines") {
+		t.Fatalf("unexpected /metrics response: code=%d body=%s", recMet.Code, recMet.Body.String())
+	}
+
+	// 7. RBAC: auditor can GET /api/rules and /api/audit-logs, but POST /api/rules returns 403
+	_ = s.CreateUser(&store.User{Username: "auditor1", Email: "a@test.local", HashedPassword: hash, Role: "auditor", IsActive: true})
+	audTok, _ := am.CreateToken("auditor1", "auditor")
+	for _, ep := range []string{"/api/rules", "/api/audit-logs"} {
+		reqAud := httptest.NewRequest("GET", ep, nil)
+		reqAud.Header.Set("Authorization", "Bearer "+audTok)
+		recAud := httptest.NewRecorder()
+		h.ServeHTTP(recAud, reqAud)
+		if recAud.Code != http.StatusOK {
+			t.Fatalf("expected 200 for auditor GET %s, got %d", ep, recAud.Code)
+		}
+	}
+	reqAudWrite := httptest.NewRequest("POST", "/api/rules", strings.NewReader(`{"name":"x","pattern":"y"}`))
+	reqAudWrite.Header.Set("Authorization", "Bearer "+audTok)
+	recAudWrite := httptest.NewRecorder()
+	h.ServeHTTP(recAudWrite, reqAudWrite)
+	if recAudWrite.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for auditor POST /api/rules, got %d", recAudWrite.Code)
+	}
+
+	// 8. SIEM Log Export (JSONL and CEF)
+	for _, fmtName := range []string{"jsonl", "cef"} {
+		reqExp := httptest.NewRequest("GET", "/api/logs/export?format="+fmtName, nil)
+		reqExp.Header.Set("Authorization", "Bearer "+audTok)
+		recExp := httptest.NewRecorder()
+		h.ServeHTTP(recExp, reqExp)
+		if recExp.Code != http.StatusOK {
+			t.Fatalf("expected 200 for SIEM export format=%s, got %d", fmtName, recExp.Code)
+		}
+	}
 }

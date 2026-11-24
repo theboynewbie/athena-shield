@@ -183,6 +183,7 @@ func (sv *Server) apiCreateProxyHost(w http.ResponseWriter, r *http.Request, use
 		writeDetailError(w, 400, fmt.Sprintf("Domain '%s' sudah terdaftar atau gagal disimpan.", dom))
 		return
 	}
+	sv.recordAudit(r, user, "CREATE_HOST", h.DomainName, "Upstream: "+h.TargetUpstream)
 	writeJSON(w, http.StatusCreated, h)
 }
 
@@ -295,6 +296,7 @@ func (sv *Server) apiUpdateProxyHost(w http.ResponseWriter, r *http.Request, use
 		writeDetailError(w, 400, err.Error())
 		return
 	}
+	sv.recordAudit(r, user, "UPDATE_HOST", h.DomainName, "Mode: "+h.WAFMode)
 	writeJSON(w, http.StatusOK, h)
 }
 
@@ -309,6 +311,7 @@ func (sv *Server) apiDeleteProxyHost(w http.ResponseWriter, r *http.Request, use
 		writeDetailError(w, 404, "Proxy host tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "DELETE_HOST", dom, "Host dihapus")
 	writeJSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Proxy host untuk domain %s berhasil dihapus", dom)})
 }
 
@@ -405,6 +408,7 @@ func (sv *Server) apiCreateRule(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, err.Error())
 		return
 	}
+	sv.recordAudit(r, user, "CREATE_RULE", rule.Name, fmt.Sprintf("Action=%s PL=%d Score=%d", rule.Action, rule.ParanoiaLevel, rule.Score))
 	writeJSON(w, http.StatusCreated, rule)
 }
 
@@ -440,6 +444,7 @@ func (sv *Server) apiUpdateRule(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 404, "Rule tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "UPDATE_RULE", rule.Name, fmt.Sprintf("Active=%v Action=%s PL=%d", rule.IsActive, rule.Action, rule.ParanoiaLevel))
 	writeJSON(w, http.StatusOK, rule)
 }
 
@@ -453,6 +458,7 @@ func (sv *Server) apiDeleteRule(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 404, "Rule tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "DELETE_RULE", fmt.Sprintf("Rule #%d", id), "Rule dihapus")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Rule berhasil dihapus"})
 }
 
@@ -486,6 +492,7 @@ func (sv *Server) apiAddIP(w http.ResponseWriter, r *http.Request, user *store.U
 		writeDetailError(w, 400, "IP ini sudah terdaftar dalam list")
 		return
 	}
+	sv.recordAudit(r, user, "ADD_IP_"+item.ListType, item.IPAddress, item.Reason)
 	writeJSON(w, http.StatusCreated, item)
 }
 
@@ -499,6 +506,7 @@ func (sv *Server) apiDeleteIP(w http.ResponseWriter, r *http.Request, user *stor
 		writeDetailError(w, 404, "IP tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "DELETE_IP", fmt.Sprintf("IP #%d", id), "IP dihapus dari list")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "IP berhasil dihapus"})
 }
 
@@ -568,6 +576,7 @@ func (sv *Server) apiUnbanIP(w http.ResponseWriter, r *http.Request, user *store
 	ip := strings.TrimSpace(in.IPAddress)
 	sv.rl.UnbanIP(ip)
 	_, _ = sv.store.DeleteBlacklistIP(ip)
+	sv.recordAudit(r, user, "UNBAN_IP", ip, "Dibebaskan dari jail/blacklist")
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": fmt.Sprintf("IP %s berhasil dibebaskan dari status Blacklist & Jail!", ip),
@@ -609,7 +618,7 @@ func (sv *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, "Password tidak valid")
 		return
 	}
-	if in.Role != "super_admin" {
+	if in.Role != "super_admin" && in.Role != "auditor" {
 		in.Role = "admin"
 	}
 	u := &store.User{
@@ -623,6 +632,7 @@ func (sv *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, "Username atau email sudah digunakan")
 		return
 	}
+	sv.recordAudit(r, user, "CREATE_USER", u.Username, "Role: "+u.Role)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": u.ID, "username": u.Username, "email": u.Email, "role": u.Role,
 	})
@@ -651,6 +661,13 @@ func (sv *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, user *st
 		if err == nil {
 			hashed = &h
 		}
+	}
+	if in.Role != nil {
+		rNorm := strings.ToLower(strings.TrimSpace(*in.Role))
+		if rNorm != "super_admin" && rNorm != "auditor" {
+			rNorm = "admin"
+		}
+		in.Role = &rNorm
 	}
 	u, err := sv.store.UpdateUser(id, in.Username, in.Email, hashed, in.Role, in.IsActive)
 	if err != nil {
@@ -706,6 +723,7 @@ func (sv *Server) apiDeleteUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 404, "User tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "DELETE_USER", fmt.Sprintf("User #%d", id), "Akun dihapus")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "User berhasil dihapus"})
 }
 
@@ -851,6 +869,7 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 		writeDetailError(w, 500, err.Error())
 		return
 	}
+	sv.recordAudit(r, user, "UPDATE_SETTINGS", "system_settings", fmt.Sprintf("%d keys updated", len(updates)))
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "Pengaturan sistem & CSIRT berhasil disimpan!"})
 }
 
@@ -1049,6 +1068,7 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 		_ = sv.store.UpdateSettings(upd)
 	}
 
+	sv.recordAudit(r, user, "IMPORT_BACKUP", "configuration", fmt.Sprintf("%d hosts, %d rules, %d IPs", impHosts, impRules, impIPs))
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": fmt.Sprintf("Konfigurasi berhasil dipulihkan (%d Proxy Host, %d Rules, %d IP List)!", impHosts, impRules, impIPs),

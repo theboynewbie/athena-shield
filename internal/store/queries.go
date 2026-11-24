@@ -15,34 +15,36 @@ import (
 
 func (s *Store) GetUserByUsernameOrEmail(ident string) (*User, error) {
 	u := &User{}
-	var active int
+	var active, totpEn int
 	err := s.db.QueryRow(
-		`SELECT id, username, email, hashed_password, role, is_active, created_at FROM users WHERE username = ? OR email = ? LIMIT 1`,
+		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), is_active, created_at FROM users WHERE username = ? OR email = ? LIMIT 1`,
 		ident, ident,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &active, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &active, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	u.IsActive = active == 1
+	u.TOTPEnabled = totpEn == 1
 	return u, nil
 }
 
 func (s *Store) GetUserByUsername(username string) (*User, error) {
 	u := &User{}
-	var active int
+	var active, totpEn int
 	err := s.db.QueryRow(
-		`SELECT id, username, email, hashed_password, role, is_active, created_at FROM users WHERE username = ? AND is_active = 1 LIMIT 1`,
+		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), is_active, created_at FROM users WHERE username = ? AND is_active = 1 LIMIT 1`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &active, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &active, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	u.IsActive = active == 1
+	u.TOTPEnabled = totpEn == 1
 	return u, nil
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT id, username, email, role, is_active, created_at FROM users ORDER BY id ASC`)
+	rows, err := s.db.Query(`SELECT id, username, email, role, COALESCE(totp_enabled,0), is_active, created_at FROM users ORDER BY id ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -50,12 +52,50 @@ func (s *Store) ListUsers() ([]User, error) {
 	var out []User
 	for rows.Next() {
 		var u User
-		var active int
-		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &active, &u.CreatedAt); err != nil {
+		var active, totpEn int
+		if err := rows.Scan(&u.ID, &u.Username, &u.Email, &u.Role, &totpEn, &active, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.IsActive = active == 1
+		u.TOTPEnabled = totpEn == 1
 		out = append(out, u)
+	}
+	return out, nil
+}
+
+func (s *Store) SetUserTOTP(id int64, secret string, enabled bool) error {
+	_, err := s.db.Exec(`UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`, secret, boolToInt(enabled), id)
+	return err
+}
+
+func (s *Store) RecordAuditLog(entry AuditLog) {
+	if entry.Timestamp.IsZero() {
+		entry.Timestamp = time.Now().UTC()
+	}
+	_, _ = s.db.Exec(
+		`INSERT INTO audit_logs (timestamp, actor, role, action, target, details, client_ip) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		entry.Timestamp.UTC(), entry.Actor, entry.Role, entry.Action, entry.Target, entry.Details, entry.ClientIP,
+	)
+}
+
+func (s *Store) ListAuditLogs(limit int) ([]AuditLog, error) {
+	if limit <= 0 {
+		limit = 100
+	} else if limit > 500 {
+		limit = 500
+	}
+	rows, err := s.db.Query(`SELECT id, timestamp, actor, role, action, target, details, client_ip FROM audit_logs ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]AuditLog, 0)
+	for rows.Next() {
+		var a AuditLog
+		if err := rows.Scan(&a.ID, &a.Timestamp, &a.Actor, &a.Role, &a.Action, &a.Target, &a.Details, &a.ClientIP); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
 	return out, nil
 }

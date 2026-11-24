@@ -272,6 +272,95 @@
             </div>
         </div>
     </div>
+
+    <!-- Governance, 2FA & Observability -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <!-- 2FA & Observability -->
+        <div class="dasher-card rounded-xl p-6 space-y-4">
+            <div class="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3.5">
+                <div>
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">2FA Authenticator &amp; Observability</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">TOTP 2FA (RFC 6238), Prometheus /metrics &amp; SIEM Log Export</p>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[10px] font-medium"
+                    :class="twoFA.enabled ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'"
+                    x-text="twoFA.enabled ? '2FA Aktif' : '2FA Nonaktif'"></span>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <template x-if="!twoFA.enabled && !twoFA.setupSecret">
+                    <button @click="setup2FA()" class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        Aktifkan 2FA Authenticator
+                    </button>
+                </template>
+                <template x-if="!twoFA.enabled && twoFA.setupSecret">
+                    <div class="p-3.5 rounded-lg bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800 space-y-2.5">
+                        <div class="text-zinc-700 dark:text-zinc-300 font-medium">1. Tambahkan Secret ke Google Authenticator / Authy:</div>
+                        <div class="p-2 rounded bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono text-[11px] break-all select-all" x-text="twoFA.setupSecret"></div>
+                        <div class="text-[11px] text-zinc-400 break-all" x-text="twoFA.otpauthURI"></div>
+                        <div class="flex items-center gap-2 pt-1">
+                            <input type="text" x-model="twoFA.code" maxlength="6" placeholder="Kode 6 digit" class="px-3 py-1.5 border rounded-lg w-32 tabular-nums">
+                            <button @click="verify2FA()" class="px-3 py-1.5 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-medium">Verifikasi &amp; Aktifkan</button>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="twoFA.enabled">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <input type="password" x-model="twoFA.disablePass" placeholder="Password untuk nonaktifkan 2FA" class="px-3 py-1.5 border rounded-lg text-xs">
+                        <button @click="disable2FA()" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-medium">Nonaktifkan 2FA</button>
+                    </div>
+                </template>
+
+                <div class="pt-2 border-t border-zinc-100 dark:border-zinc-800 flex flex-wrap gap-2">
+                    <a href="/metrics" target="_blank" class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-medium">
+                        Prometheus /metrics
+                    </a>
+                    <a href="/api/logs/export?format=jsonl" class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-medium">
+                        SIEM Export (JSONL)
+                    </a>
+                    <a href="/api/logs/export?format=cef" class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 font-medium">
+                        SIEM Export (CEF)
+                    </a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Audit Log -->
+        <div class="dasher-card rounded-xl p-6 space-y-3">
+            <div class="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+                <div>
+                    <h2 class="font-display font-semibold text-sm text-zinc-900 dark:text-white">Admin Audit Log</h2>
+                    <p class="text-xs text-zinc-500 dark:text-zinc-400">Jejak perubahan konfigurasi WAF oleh operator</p>
+                </div>
+                <button @click="loadAuditLogs()" class="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-white">Refresh</button>
+            </div>
+            <div class="overflow-x-auto max-h-60 overflow-y-auto">
+                <table class="w-full text-left text-[11px]">
+                    <thead class="text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+                        <tr>
+                            <th class="py-1.5 pr-2">Actor</th>
+                            <th class="py-1.5 pr-2">Aksi</th>
+                            <th class="py-1.5 pr-2">Target</th>
+                            <th class="py-1.5">IP</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-zinc-100 dark:divide-zinc-800/80">
+                        <template x-for="al in auditLogs" :key="al.id">
+                            <tr>
+                                <td class="py-1.5 pr-2 font-medium text-zinc-900 dark:text-white" x-text="al.actor"></td>
+                                <td class="py-1.5 pr-2 text-zinc-600 dark:text-zinc-300" x-text="al.action"></td>
+                                <td class="py-1.5 pr-2 text-zinc-500 truncate max-w-[140px]" x-text="al.target"></td>
+                                <td class="py-1.5 text-zinc-400 tabular-nums" x-text="al.client_ip"></td>
+                            </tr>
+                        </template>
+                        <tr x-show="auditLogs.length === 0">
+                            <td colspan="4" class="py-4 text-center text-zinc-400">Belum ada catatan audit.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -285,6 +374,8 @@ function settingsApp() {
         showBotToken: false,
         toast: { show: false, message: '', isError: false },
         storage: { db_size_mb: 0, clean_logs_count: 0, attack_logs_count: 0, active_autobans_count: 0 },
+        twoFA: { enabled: false, setupSecret: '', otpauthURI: '', code: '', disablePass: '' },
+        auditLogs: [],
         form: {
             telegram_enabled: false,
             telegram_bot_token: '',
@@ -311,7 +402,37 @@ function settingsApp() {
             this.toast = { show: true, message: msg, isError };
             setTimeout(() => { this.toast.show = false; }, 4000);
         },
-        async init() { await this.loadSettings(); },
+        async init() { await this.loadSettings(); await this.load2FAStatus(); await this.loadAuditLogs(); },
+        async load2FAStatus() {
+            try {
+                const res = await fetch('/api/account/2fa/status');
+                if (res.ok) { const d = await res.json(); this.twoFA.enabled = !!d.enabled; }
+            } catch (e) {}
+        },
+        async setup2FA() {
+            const res = await fetch('/api/account/2fa/setup', { method: 'POST' });
+            const d = await res.json();
+            if (res.ok) { this.twoFA.setupSecret = d.secret; this.twoFA.otpauthURI = d.otpauth_uri; }
+            else { this.notify(d.detail || 'Gagal setup 2FA', true); }
+        },
+        async verify2FA() {
+            const res = await fetch('/api/account/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: this.twoFA.code }) });
+            const d = await res.json();
+            if (res.ok) { this.twoFA.enabled = true; this.twoFA.setupSecret = ''; this.twoFA.code = ''; this.notify(d.message); await this.loadAuditLogs(); }
+            else { this.notify(d.detail || 'Verifikasi 2FA gagal', true); }
+        },
+        async disable2FA() {
+            const res = await fetch('/api/account/2fa/disable', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: this.twoFA.disablePass }) });
+            const d = await res.json();
+            if (res.ok) { this.twoFA.enabled = false; this.twoFA.disablePass = ''; this.notify(d.message); await this.loadAuditLogs(); }
+            else { this.notify(d.detail || 'Gagal menonaktifkan 2FA', true); }
+        },
+        async loadAuditLogs() {
+            try {
+                const res = await fetch('/api/audit-logs?limit=25');
+                if (res.ok) this.auditLogs = await res.json();
+            } catch (e) {}
+        },
         async loadSettings() {
             this.loading = true;
             try {
