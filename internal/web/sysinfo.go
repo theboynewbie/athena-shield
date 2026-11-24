@@ -1,35 +1,172 @@
 package web
 
 import (
+	"fmt"
+	"net"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type SystemMetrics struct {
-	CPUPercent float64 `json:"cpu_percent"`
-	RAMPercent float64 `json:"ram_percent"`
-	RAMUsedGB  float64 `json:"ram_used_gb"`
-	RAMTotalGB float64 `json:"ram_total_gb"`
+	CPUPercent   float64 `json:"cpu_percent"`
+	RAMPercent   float64 `json:"ram_percent"`
+	RAMUsedGB    float64 `json:"ram_used_gb"`
+	RAMTotalGB   float64 `json:"ram_total_gb"`
+	NICName      string  `json:"nic_name"`
+	NICSpeed     string  `json:"nic_speed"`
+	NICSpeedMbps int     `json:"nic_speed_mbps"`
 }
 
 var (
-	cpuMu       sync.Mutex
-	prevIdle    uint64
-	prevTotal   uint64
-	hasPrevCPU  bool
+	cpuMu      sync.Mutex
+	prevIdle   uint64
+	prevTotal  uint64
+	hasPrevCPU bool
+
+	nicMu        sync.Mutex
+	cachedNIC    string
+	cachedSpeed  string
+	cachedMbps   int
+	nicCachedAt  time.Time
 )
 
 func ReadSystemMetrics() SystemMetrics {
-	if runtime.GOOS != "linux" {
-		return SystemMetrics{}
+	nicName, nicSpeed, nicMbps := getCachedNICInfo()
+	m := SystemMetrics{
+		NICName:      nicName,
+		NICSpeed:     nicSpeed,
+		NICSpeedMbps: nicMbps,
 	}
-	var m SystemMetrics
+	if runtime.GOOS != "linux" {
+		return m
+	}
 	m.CPUPercent = readLinuxCPU()
 	m.RAMPercent, m.RAMUsedGB, m.RAMTotalGB = readLinuxRAM()
 	return m
+}
+
+func formatNICSpeed(mbps int) string {
+	if mbps <= 0 {
+		return ""
+	}
+	if mbps >= 1000 {
+		if mbps%1000 == 0 {
+			return fmt.Sprintf("%dGbps", mbps/1000)
+		}
+		return fmt.Sprintf("%.1fGbps", float64(mbps)/1000.0)
+	}
+	return fmt.Sprintf("%dMbps", mbps)
+}
+
+func getCachedNICInfo() (name, speedLabel string, speedMbps int) {
+	nicMu.Lock()
+	if !nicCachedAt.IsZero() && time.Since(nicCachedAt) < 60*time.Second {
+		n, s, m := cachedNIC, cachedSpeed, cachedMbps
+		nicMu.Unlock()
+		return n, s, m
+	}
+	nicMu.Unlock()
+
+	if runtime.GOOS == "linux" {
+		name, speedLabel, speedMbps = readLinuxNIC()
+	} else {
+		name, speedLabel, speedMbps = readGenericNIC()
+	}
+
+	nicMu.Lock()
+	cachedNIC = name
+	cachedSpeed = speedLabel
+	cachedMbps = speedMbps
+	nicCachedAt = time.Now()
+	nicMu.Unlock()
+	return name, speedLabel, speedMbps
+}
+
+func isVirtualNICName(name string) bool {
+	if name == "lo" {
+		return true
+	}
+	for _, prefix := range []string{"docker", "br-", "veth", "virbr", "cni", "flannel", "cali", "tailscale", "wg", "tun", "tap", "kube"} {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func readLinuxNIC() (string, string, int) {
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return "", "Auto", 0
+	}
+
+	var bestPhysName, bestAnyName, fallbackUpName string
+	var bestPhysSpeed, bestAnySpeed int
+
+	for _, ent := range entries {
+		name := ent.Name()
+		if isVirtualNICName(name) {
+			continue
+		}
+		base := filepath.Join("/sys/class/net", name)
+		opBytes, err := os.ReadFile(filepath.Join(base, "operstate"))
+		if err != nil || strings.TrimSpace(string(opBytes)) != "up" {
+			continue
+		}
+		if fallbackUpName == "" {
+			fallbackUpName = name
+		}
+
+		_, devErr := os.Stat(filepath.Join(base, "device"))
+		isPhys := devErr == nil
+
+		spBytes, spErr := os.ReadFile(filepath.Join(base, "speed"))
+		if spErr != nil {
+			continue
+		}
+		mbps, err := strconv.Atoi(strings.TrimSpace(string(spBytes)))
+		if err != nil || mbps <= 0 {
+			continue
+		}
+		if isPhys && mbps > bestPhysSpeed {
+			bestPhysSpeed = mbps
+			bestPhysName = name
+		}
+		if mbps > bestAnySpeed {
+			bestAnySpeed = mbps
+			bestAnyName = name
+		}
+	}
+
+	if bestPhysName != "" {
+		return bestPhysName, formatNICSpeed(bestPhysSpeed), bestPhysSpeed
+	}
+	if bestAnyName != "" {
+		return bestAnyName, formatNICSpeed(bestAnySpeed), bestAnySpeed
+	}
+	if fallbackUpName != "" {
+		return fallbackUpName, "Virtual NIC", 0
+	}
+	return "", "Auto", 0
+}
+
+func readGenericNIC() (string, string, int) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", "Auto", 0
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
+			continue
+		}
+		return iface.Name, "Auto", 0
+	}
+	return "", "Auto", 0
 }
 
 func readLinuxCPU() float64 {

@@ -153,7 +153,7 @@ func (sv *Server) apiExportLogsSIEM(w http.ResponseWriter, r *http.Request, user
 				reason = "Clean traffic"
 			}
 			_, _ = fmt.Fprintf(w,
-				"CEF:0|AthenaShield|WAF|1.5|%s|%s|%d|rt=%s src=%s dhost=%s requestMethod=%s request=%s outcome=%s cn1=%d cn1Label=StatusCode\n",
+				"CEF:0|AthenaShield|WAF|1.0|%s|%s|%d|rt=%s src=%s dhost=%s requestMethod=%s request=%s outcome=%s cn1=%d cn1Label=StatusCode\n",
 				evName, cefEscape(reason), sev,
 				l.Timestamp.UTC().Format(time.RFC3339),
 				cefExtEscape(l.ClientIP), cefExtEscape(l.Host),

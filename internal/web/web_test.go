@@ -148,3 +148,25 @@ func TestLoginPageAndAuthFlow(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatNICSpeed(t *testing.T) {
+	cases := []struct {
+		mbps int
+		want string
+	}{
+		{0, ""},
+		{-1, ""},
+		{100, "100Mbps"},
+		{1000, "1Gbps"},
+		{2500, "2.5Gbps"},
+		{10000, "10Gbps"},
+		{25000, "25Gbps"},
+		{40000, "40Gbps"},
+		{100000, "100Gbps"},
+	}
+	for _, tc := range cases {
+		if got := formatNICSpeed(tc.mbps); got != tc.want {
+			t.Fatalf("formatNICSpeed(%d) = %q, want %q", tc.mbps, got, tc.want)
+		}
+	}
+}

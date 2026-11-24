@@ -210,7 +210,7 @@
                     <img src="/static/athena-nav-logo.png?v=1" alt="Athena Shield" class="w-11 h-11 object-contain shrink-0">
                     <div x-show="!sidebarCollapsed" class="truncate flex items-baseline gap-1.5">
                         <span class="font-display font-semibold text-sm tracking-tight text-slate-900 dark:text-white">Athena <span class="text-[#1D5CE0] dark:text-[#6094FF]">Shield</span></span>
-                        <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#E8762E]/12 text-[#D45B1F] dark:bg-[#F5973E]/15 dark:text-[#F5973E]">1.5</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#E8762E]/12 text-[#D45B1F] dark:bg-[#F5973E]/15 dark:text-[#F5973E]">1.0</span>
                     </div>
                 </a>
                 <button @click="mobileMenuOpen = false" class="md:hidden text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
@@ -324,6 +324,8 @@
                     <span>CPU <strong class="text-zinc-900 dark:text-[#60A5FA] font-medium" x-text="(sys.cpu_percent || 0) + '%'">0%</strong></span>
                     <span class="text-zinc-300 dark:text-[#1e2d4a]">/</span>
                     <span>RAM <strong class="text-zinc-900 dark:text-[#F5973E] font-medium" x-text="(sys.ram_percent || 0) + '%'">0%</strong></span>
+                    <span class="text-zinc-300 dark:text-[#1e2d4a]">/</span>
+                    <span :title="'Ethernet Interface: ' + (sys.nic_name || 'auto')">NIC <strong class="text-zinc-900 dark:text-emerald-400 font-medium" x-text="sys.nic_speed || 'Auto'">Auto</strong></span>
                 </div>
 
                 <button @click="flushNginxCache()" :disabled="flushingCache" title="Bersihkan seluruh cache Nginx sekarang"
@@ -348,7 +350,10 @@
                         cpu_percent: 0,
                         ram_percent: 0,
                         ram_used_gb: 0,
-                        ram_total_gb: 0
+                        ram_total_gb: 0,
+                        nic_name: '',
+                        nic_speed: 'Auto',
+                        nic_speed_mbps: 0
                     },
                     flushingCache: false,
                     async flushNginxCache() {

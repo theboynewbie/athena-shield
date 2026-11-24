@@ -330,7 +330,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusServiceUnavailable, false, "[CHALLENGE] "+dec.Reason, ua, host.DomainName, cfCountry)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
-			w.Header().Set("X-Protected-By", "Athena-Shield-v1.5")
+			w.Header().Set("X-Protected-By", "Athena-Shield-v1.0")
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte(waf.RenderChallengeHTML(host.DomainName, nonce, exp, sig, diff, fullURI)))
 			return
@@ -344,7 +344,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				rt.notifier.Notify("attack", fmt.Sprintf("Serangan Diblokir [%s]", dec.Category), host.DomainName, clientIP, fullURI, dec.Reason)
 			}
 
-			w.Header().Set("X-Protected-By", "Athena-Shield-v1.5")
+			w.Header().Set("X-Protected-By", "Athena-Shield-v1.0")
 			if statusCode == http.StatusTooManyRequests {
 				retry := dec.RetryAfter
 				if retry <= 0 {
@@ -607,7 +607,7 @@ func setSecurityHeaders(h http.Header) {
 	h.Del("X-AspNetMvc-Version")
 	h.Del("X-Runtime")
 	h.Set("Server", "Athena-Shield")
-	h.Set("X-Protected-By", "Athena-Shield-v1.5")
+	h.Set("X-Protected-By", "Athena-Shield-v1.0")
 	h.Set("X-Frame-Options", "SAMEORIGIN")
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-XSS-Protection", "1; mode=block")
