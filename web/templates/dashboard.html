@@ -15,40 +15,46 @@
             </p>
         </div>
         <button @click="fetchStats()"
-            class="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-medium border border-zinc-200 dark:border-zinc-800 flex items-center gap-2 transition-colors">
-            <i class="fa-solid fa-arrows-rotate text-[11px] text-zinc-400" :class="loading ? 'animate-spin' : ''"></i>
+            class="px-3 py-1.5 rounded-lg bg-white dark:bg-[#111622] hover:border-[#1D5CE0]/50 hover:text-[#1D5CE0] dark:hover:text-[#6094FF] text-zinc-700 dark:text-zinc-200 text-xs font-medium border border-slate-200 dark:border-[#1e293b] flex items-center gap-2 transition-colors">
+            <i class="fa-solid fa-arrows-rotate text-[11px] text-[#1D5CE0] dark:text-[#6094FF]" :class="loading ? 'animate-spin' : ''"></i>
             <span>Sync</span>
         </button>
     </div>
 
     <!-- 4 Editorial KPI Cards -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="dasher-card rounded-xl p-5">
-            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Inbound Requests</div>
+        <div class="dasher-card rounded-xl p-5 border-t-2 border-t-[#1D5CE0]">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Inbound Requests</span>
+                <span class="w-7 h-7 rounded-lg bg-[#1D5CE0]/10 dark:bg-[#3B82F6]/15 text-[#1D5CE0] dark:text-[#60A5FA] flex items-center justify-center text-xs"><i class="fa-solid fa-globe"></i></span>
+            </div>
             <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.total_requests || 0).toLocaleString('id-ID')">0</div>
             <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Reverse proxied traffic</div>
         </div>
 
-        <div class="dasher-card rounded-xl p-5">
+        <div class="dasher-card rounded-xl p-5 border-t-2 border-t-rose-500">
             <div class="flex items-center justify-between">
                 <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Attacks Neutralized</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                <span class="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center text-xs"><i class="fa-solid fa-shield-virus"></i></span>
             </div>
             <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.blocked_requests || 0).toLocaleString('id-ID')">0</div>
             <div class="text-[11px] text-rose-600 dark:text-rose-400 mt-1 tabular-nums" x-text="blockRate() + '% block ratio (HTTP 403)'">0% block ratio</div>
         </div>
 
-        <div class="dasher-card rounded-xl p-5">
+        <div class="dasher-card rounded-xl p-5 border-t-2 border-t-emerald-500">
             <div class="flex items-center justify-between">
                 <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Clean Traffic</span>
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span class="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-xs"><i class="fa-solid fa-circle-check"></i></span>
             </div>
             <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="(stats.allowed_requests || 0).toLocaleString('id-ID')">0</div>
             <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Forwarded to upstream</div>
         </div>
 
-        <div class="dasher-card rounded-xl p-5">
-            <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Active Defense Rules</div>
+        <div class="dasher-card rounded-xl p-5 border-t-2 border-t-[#E8762E]">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Active Defense Rules</span>
+                <span class="w-7 h-7 rounded-lg bg-[#E8762E]/10 dark:bg-[#F5973E]/15 text-[#D45B1F] dark:text-[#F5973E] flex items-center justify-center text-xs"><i class="fa-solid fa-shield-halved"></i></span>
+            </div>
             <div class="text-2xl font-display font-semibold text-zinc-900 dark:text-white mt-1.5 tabular-nums" x-text="stats.active_rules_count || 0">0</div>
             <div class="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">Slot + OWASP compiled</div>
         </div>
@@ -158,15 +164,15 @@
 
             <div class="divide-y divide-zinc-100 dark:divide-zinc-800/80 text-xs">
                 <div class="py-3">
-                    <div class="font-medium text-zinc-900 dark:text-white">Anti-Judi Slot & Aggressive Crawler Shield</div>
-                    <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Blokir injeksi judol serta drop bot scraper (<code class="text-zinc-700 dark:text-zinc-300">ClaudeBot</code>, <code class="text-zinc-700 dark:text-zinc-300">SemrushBot</code>, <code class="text-zinc-700 dark:text-zinc-300">AhrefsBot</code>) di Edge Nginx.</p>
+                    <div class="font-medium text-zinc-900 dark:text-white flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-[#E8762E]"></span>Anti-Judi Slot & Aggressive Crawler Shield</div>
+                    <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Blokir injeksi judol serta drop bot scraper (<code class="text-zinc-700 dark:text-zinc-300">ClaudeBot</code>, <code class="text-zinc-700 dark:text-zinc-300">SemrushBot</code>, <code class="text-zinc-700 dark:text-zinc-300">AhrefsBot</code>) di Edge Proxy.</p>
                 </div>
                 <div class="py-3">
-                    <div class="font-medium text-zinc-900 dark:text-white">Multi-Framework Virtual Patching</div>
+                    <div class="font-medium text-zinc-900 dark:text-white flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-[#1D5CE0]"></span>Multi-Framework Virtual Patching</div>
                     <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Proteksi <code class="text-zinc-700 dark:text-zinc-300">.env</code>, <code class="text-zinc-700 dark:text-zinc-300">.git</code>, <code class="text-zinc-700 dark:text-zinc-300">sysconfig</code>, <code class="text-zinc-700 dark:text-zinc-300">config.inc.php</code>, <code class="text-zinc-700 dark:text-zinc-300">wp-config.php</code>, Log4Shell, & anti-webshell.</p>
                 </div>
                 <div class="py-3">
-                    <div class="font-medium text-zinc-900 dark:text-white">Multi-Tier Rate Limiting & 24H Auto-Ban</div>
+                    <div class="font-medium text-zinc-900 dark:text-white flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-[#1D5CE0]"></span>Multi-Tier Rate Limiting & 24H Auto-Ban</div>
                     <p class="text-zinc-500 dark:text-zinc-400 mt-0.5 leading-relaxed">Proteksi brute-force lintas endpoint login (<code class="text-zinc-700 dark:text-zinc-300">/login</code>, <code class="text-zinc-700 dark:text-zinc-300">?p=login</code>, <code class="text-zinc-700 dark:text-zinc-300">/wp-login.php</code>) dengan auto-jail 24 jam.</p>
                 </div>
             </div>

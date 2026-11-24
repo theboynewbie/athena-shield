@@ -68,11 +68,12 @@
         }
         .dasher-card {
             background-color: #ffffff;
-            border: 1px solid #e4e4e7;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
         }
         html.dark .dasher-card {
-            background-color: #111113;
-            border-color: #27272a;
+            background-color: #111622;
+            border-color: #1e293b;
         }
         .tabular-nums {
             font-variant-numeric: tabular-nums;
@@ -95,9 +96,9 @@
         html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]),
         html.dark select,
         html.dark textarea {
-            background-color: #09090b;
+            background-color: #0b101b;
             color: #fafafa;
-            border-color: #27272a;
+            border-color: #1e293b;
         }
         input::placeholder, textarea::placeholder {
             color: #a1a1aa;
@@ -110,7 +111,7 @@
             color: #18181b;
         }
         html.dark select option {
-            background-color: #111113;
+            background-color: #111622;
             color: #fafafa;
         }
 
@@ -169,7 +170,7 @@
             window.dispatchEvent(new CustomEvent('athena-theme-changed', { detail: { dark: this.isDark } }));
         }
     }"
-    class="bg-[#fafafa] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden selection:bg-[#1D5CE0] selection:text-white">
+    class="bg-[#f4f7fc] dark:bg-[#0a0e17] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden selection:bg-[#1D5CE0] selection:text-white">
 
     {{if .User}}
     <!-- Mobile Sidebar Backdrop -->
@@ -181,14 +182,14 @@
             sidebarCollapsed ? 'md:w-[68px]' : 'md:w-60',
             mobileMenuOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         ]"
-        class="fixed md:sticky top-0 left-0 h-screen w-60 bg-white dark:bg-[#0c0c0e] border-r border-zinc-200 dark:border-zinc-800 flex flex-col justify-between shrink-0 z-50 transition-all duration-150">
+        class="fixed md:sticky top-0 left-0 h-screen w-60 bg-white dark:bg-[#0d121d] border-r border-slate-200 dark:border-[#1e293b] border-t-2 border-t-[#1D5CE0] flex flex-col justify-between shrink-0 z-50 transition-all duration-150">
         <div class="overflow-y-auto overflow-x-hidden flex-1">
             <!-- Brand -->
-            <div class="h-16 flex items-center px-4 border-b border-zinc-100 dark:border-zinc-800/80 justify-between">
+            <div class="h-16 flex items-center px-4 border-b border-slate-100 dark:border-[#1e293b] justify-between">
                 <a href="/dashboard" class="flex items-center gap-3 min-w-0">
                     <img src="/static/athena-nav-logo.png?v=1" alt="Athena Shield" class="w-11 h-11 object-contain shrink-0">
                     <div x-show="!sidebarCollapsed" class="truncate flex items-baseline gap-1.5">
-                        <span class="font-display font-semibold text-sm tracking-tight text-zinc-900 dark:text-white">Athena Shield</span>
+                        <span class="font-display font-semibold text-sm tracking-tight text-slate-900 dark:text-white">Athena <span class="text-[#1D5CE0] dark:text-[#6094FF]">Shield</span></span>
                         <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#E8762E]/12 text-[#D45B1F] dark:bg-[#F5973E]/15 dark:text-[#F5973E]">1.5</span>
                     </div>
                 </a>
@@ -280,7 +281,7 @@
         {{if .User}}
         <!-- Compact Top Navbar -->
         <header x-data="hardwareTelemetry()" x-init="startTelemetry()"
-            class="h-14 bg-white/80 dark:bg-[#09090b]/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
+            class="h-14 bg-white/85 dark:bg-[#0a0e17]/85 backdrop-blur-md border-b border-slate-200 dark:border-[#1e293b] flex items-center justify-between px-4 sm:px-6 lg:px-8 sticky top-0 z-30">
             <div class="flex items-center gap-3">
                 <button @click="mobileMenuOpen = true" type="button"
                     class="md:hidden w-8 h-8 rounded-lg flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -291,9 +292,9 @@
                     <i class="fa-solid text-xs" :class="sidebarCollapsed ? 'fa-indent' : 'fa-outdent'"></i>
                 </button>
 
-                <div class="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+                <div class="flex items-center gap-2 text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400">
                     <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span class="font-medium text-zinc-800 dark:text-zinc-200">Shield Online</span>
+                    <span class="font-medium">Shield Online</span>
                 </div>
             </div>
 
@@ -306,7 +307,7 @@
                 </div>
 
                 <button @click="flushNginxCache()" :disabled="flushingCache" title="Bersihkan seluruh cache Nginx sekarang"
-                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 transition-colors text-xs font-medium">
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#E8762E] hover:bg-[#D45B1F] text-white transition-colors text-xs font-medium">
                     <i class="fa-solid fa-broom text-[10px]" :class="flushingCache ? 'animate-spin' : ''"></i>
                     <span class="hidden lg:inline" x-text="flushingCache ? 'Flushing...' : 'Flush Cache'">Flush Cache</span>
                 </button>
