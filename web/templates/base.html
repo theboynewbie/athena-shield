@@ -113,6 +113,45 @@
             background-color: #111113;
             color: #fafafa;
         }
+
+        /* Athena Shield Brand Tokens (Cobalt Blue & Shield Orange — Anti-AI-Slop) */
+        :root {
+            --athena-blue: #1D5CE0;
+            --athena-blue-hover: #164BC0;
+            --athena-orange: #E8762E;
+            --athena-orange-deep: #D45B1F;
+        }
+        .btn-brand {
+            background-color: #1D5CE0 !important;
+            color: #ffffff !important;
+            transition: background-color 150ms ease;
+        }
+        .btn-brand:hover {
+            background-color: #164BC0 !important;
+        }
+        html.dark .btn-brand {
+            background-color: #2563EB !important;
+            color: #ffffff !important;
+        }
+        html.dark .btn-brand:hover {
+            background-color: #1D5CE0 !important;
+        }
+        input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):focus,
+        select:focus,
+        textarea:focus {
+            border-color: #1D5CE0 !important;
+            box-shadow: 0 0 0 2px rgba(29, 92, 224, 0.16);
+            outline: none;
+        }
+        html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"]):focus,
+        html.dark select:focus,
+        html.dark textarea:focus {
+            border-color: #6094FF !important;
+            box-shadow: 0 0 0 2px rgba(96, 148, 255, 0.20);
+        }
+        input[type="checkbox"], input[type="radio"] {
+            accent-color: #1D5CE0;
+        }
     </style>
 </head>
 <body x-data="{
@@ -130,7 +169,7 @@
             window.dispatchEvent(new CustomEvent('athena-theme-changed', { detail: { dark: this.isDark } }));
         }
     }"
-    class="bg-[#fafafa] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden selection:bg-zinc-900 selection:text-white dark:selection:bg-white dark:selection:text-zinc-900">
+    class="bg-[#fafafa] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex flex-col md:flex-row overflow-x-hidden selection:bg-[#1D5CE0] selection:text-white">
 
     {{if .User}}
     <!-- Mobile Sidebar Backdrop -->
@@ -150,7 +189,7 @@
                     <img src="/static/athena-nav-logo.png?v=1" alt="Athena Shield" class="w-11 h-11 object-contain shrink-0">
                     <div x-show="!sidebarCollapsed" class="truncate flex items-baseline gap-1.5">
                         <span class="font-display font-semibold text-sm tracking-tight text-zinc-900 dark:text-white">Athena Shield</span>
-                        <span class="text-[10px] text-zinc-400 font-medium">1.5</span>
+                        <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-[#E8762E]/12 text-[#D45B1F] dark:bg-[#F5973E]/15 dark:text-[#F5973E]">1.5</span>
                     </div>
                 </a>
                 <button @click="mobileMenuOpen = false" class="md:hidden text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200">
@@ -165,30 +204,30 @@
                 </div>
 
                 <a href="/dashboard" title="Dashboard Telemetry"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "dashboard"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "dashboard"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-chart-pie w-4 text-center text-xs {{if eq .ActivePage "dashboard"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-chart-pie w-4 text-center text-xs {{if eq .ActivePage "dashboard"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Telemetry</span>
                 </a>
 
                 <a href="/proxy-hosts" title="Reverse Proxy & SSL"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "proxy_hosts"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "proxy_hosts"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-network-wired w-4 text-center text-xs {{if eq .ActivePage "proxy_hosts"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-network-wired w-4 text-center text-xs {{if eq .ActivePage "proxy_hosts"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Proxy & SSL</span>
                 </a>
 
                 <a href="/rules" title="Rules & Slot Keywords"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "rules"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "rules"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-shield-halved w-4 text-center text-xs {{if eq .ActivePage "rules"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-shield-halved w-4 text-center text-xs {{if eq .ActivePage "rules"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">WAF Rules</span>
                 </a>
 
                 <a href="/logs" title="Audit & Attack Logs"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "logs"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "logs"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-file-lines w-4 text-center text-xs {{if eq .ActivePage "logs"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-file-lines w-4 text-center text-xs {{if eq .ActivePage "logs"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Audit Logs</span>
                 </a>
 
@@ -199,16 +238,16 @@
                 <div x-show="sidebarCollapsed" class="my-2 border-t border-zinc-100 dark:border-zinc-800"></div>
 
                 <a href="/users" title="User Management"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "users"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "users"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-user-shield w-4 text-center text-xs {{if eq .ActivePage "users"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-user-shield w-4 text-center text-xs {{if eq .ActivePage "users"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Operators</span>
                 </a>
 
                 <a href="/settings" title="CSIRT, Storage & Backup"
-                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "settings"}}bg-zinc-100 dark:bg-zinc-800/80 text-zinc-900 dark:text-white font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
+                    class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-[13px] transition-colors {{if eq .ActivePage "settings"}}bg-[#1D5CE0]/10 dark:bg-[#4B84FF]/15 text-[#1D5CE0] dark:text-[#78A6FF] font-medium{{else}}text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800/40{{end}}"
                     :class="sidebarCollapsed ? 'justify-center' : ''">
-                    <i class="fa-solid fa-sliders w-4 text-center text-xs {{if eq .ActivePage "settings"}}text-zinc-900 dark:text-white{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
+                    <i class="fa-solid fa-sliders w-4 text-center text-xs {{if eq .ActivePage "settings"}}text-[#1D5CE0] dark:text-[#78A6FF]{{else}}text-zinc-400 dark:text-zinc-500{{end}}"></i>
                     <span x-show="!sidebarCollapsed" class="truncate">Settings & Backup</span>
                 </a>
                 {{end}}
@@ -219,7 +258,7 @@
         <div class="p-2.5 border-t border-zinc-100 dark:border-zinc-800/80">
             <div class="p-2 rounded-lg flex items-center" :class="sidebarCollapsed ? 'justify-center flex-col gap-2' : 'justify-between'">
                 <div class="flex items-center gap-2.5 min-w-0">
-                    <div class="w-7 h-7 rounded-md bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 flex items-center justify-center font-semibold text-xs uppercase shrink-0">
+                    <div class="w-7 h-7 rounded-md bg-[#1D5CE0] text-white flex items-center justify-center font-semibold text-xs uppercase shrink-0">
                         {{firstChar .User.Username}}
                     </div>
                     <div x-show="!sidebarCollapsed" class="min-w-0">

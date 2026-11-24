@@ -138,10 +138,10 @@ func RenderChallengeHTML(host, nonce string, expires int64, sig string, difficul
 <style>
   body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#09090b; color:#fafafa; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
   .card { max-width:420px; width:100%%; background:#111113; border:1px solid #27272a; border-radius:14px; padding:28px; box-shadow:0 20px 45px rgba(0,0,0,.55); text-align:center; }
-  .badge { display:inline-block; font-size:11px; font-weight:600; color:#a1a1aa; background:#18181b; border:1px solid #27272a; padding:4px 10px; border-radius:999px; margin-bottom:14px; }
+  .badge { display:inline-block; font-size:11px; font-weight:600; color:#F5973E; background:#18181b; border:1px solid #27272a; padding:4px 10px; border-radius:999px; margin-bottom:14px; }
   h1 { font-size:17px; font-weight:600; margin:0 0 8px; letter-spacing:-0.01em; }
   p { font-size:13px; color:#a1a1aa; margin:0 0 20px; line-height:1.5; }
-  .spinner { width:34px; height:34px; border:3px solid #27272a; border-top-color:#fafafa; border-radius:50%%; margin:0 auto 14px; animation:spin .8s linear infinite; }
+  .spinner { width:34px; height:34px; border:3px solid #27272a; border-top-color:#1D5CE0; border-radius:50%%; margin:0 auto 14px; animation:spin .8s linear infinite; }
   @keyframes spin { to { transform:rotate(360deg); } }
   .status { font-size:12px; color:#71717a; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
 </style>

@@ -43,7 +43,7 @@
         </div>
         <div class="dasher-card rounded-xl p-5">
             <div class="text-xs font-medium text-zinc-500 dark:text-zinc-400">Log Insiden Serangan</div>
-            <div class="text-2xl font-display font-semibold text-rose-600 dark:text-rose-400 mt-1.5 tabular-nums" x-text="(storage.attack_logs_count || 0).toLocaleString('id-ID')">0</div>
+            <div class="text-2xl font-display font-semibold text-[#E8762E] dark:text-[#F5973E] mt-1.5 tabular-nums" x-text="(storage.attack_logs_count || 0).toLocaleString('id-ID')">0</div>
             <div class="text-[11px] text-zinc-400 mt-1 tabular-nums" x-text="'Auto-Prune > ' + form.log_retention_attack_days + ' hari'"></div>
         </div>
         <div class="dasher-card rounded-xl p-5">
@@ -108,7 +108,7 @@
 
                 <div class="flex flex-wrap gap-2 pt-1">
                     <button @click="saveAllSettings()" :disabled="saving"
-                        class="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        class="px-4 py-2 rounded-lg btn-brand font-medium transition-colors">
                         <span x-text="saving ? 'Menyimpan...' : 'Simpan Pengaturan'"></span>
                     </button>
                     <button @click="testTelegram()" :disabled="testingTelegram"
@@ -161,7 +161,7 @@
 
                 <div class="flex flex-wrap gap-2 pt-1">
                     <button @click="saveAllSettings()" :disabled="saving"
-                        class="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        class="px-4 py-2 rounded-lg btn-brand font-medium transition-colors">
                         <span x-text="saving ? 'Menyimpan...' : 'Simpan Anti-Bot &amp; GeoIP'"></span>
                     </button>
                 </div>
@@ -213,7 +213,7 @@
 
                 <div class="flex flex-wrap gap-2 pt-1 text-xs">
                     <button @click="saveAllSettings()" :disabled="saving"
-                        class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        class="px-3.5 py-2 rounded-lg btn-brand font-medium transition-colors">
                         <span x-text="saving ? 'Menyimpan...' : 'Simpan Engine WAF'"></span>
                     </button>
                 </div>
@@ -240,7 +240,7 @@
 
                 <div class="flex flex-wrap gap-2 pt-1 text-xs">
                     <button @click="saveAllSettings()" :disabled="saving"
-                        class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                        class="px-3.5 py-2 rounded-lg btn-brand font-medium transition-colors">
                         Simpan Retensi
                     </button>
                     <button @click="pruneLogsNow()" :disabled="pruning"
@@ -258,7 +258,7 @@
 
                 <div class="flex flex-wrap items-center gap-2.5 text-xs">
                     <a href="/api/backup/export"
-                        class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors inline-flex items-center gap-2">
+                        class="px-3.5 py-2 rounded-lg btn-brand font-medium transition-colors inline-flex items-center gap-2">
                         <i class="fa-solid fa-download text-[11px]"></i>
                         <span>Export Backup (.json)</span>
                     </a>
@@ -289,7 +289,7 @@
 
             <div class="space-y-3 text-xs">
                 <template x-if="!twoFA.enabled && !twoFA.setupSecret">
-                    <button @click="setup2FA()" class="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium transition-colors">
+                    <button @click="setup2FA()" class="px-3.5 py-2 rounded-lg btn-brand font-medium transition-colors">
                         Aktifkan 2FA Authenticator
                     </button>
                 </template>

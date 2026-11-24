@@ -15,7 +15,7 @@
             </p>
         </div>
         <button @click="openModal()"
-            class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors">
+            class="px-3.5 py-2 btn-brand text-xs font-medium rounded-lg flex items-center gap-2 transition-colors">
             <i class="fa-solid fa-plus text-[11px]"></i>
             <span>Tambah Rule</span>
         </button>
@@ -24,32 +24,32 @@
     <!-- Category Filter Tabs -->
     <div class="flex flex-wrap gap-1.5 border-b border-zinc-200 dark:border-zinc-800 pb-3">
         <button @click="selectedCategory = 'all'"
-            :class="selectedCategory === 'all' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'all' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             Semua
         </button>
         <button @click="selectedCategory = 'judi_slot'"
-            :class="selectedCategory === 'judi_slot' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'judi_slot' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             Judi & Slot
         </button>
         <button @click="selectedCategory = 'sqli'"
-            :class="selectedCategory === 'sqli' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'sqli' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             SQL Injection
         </button>
         <button @click="selectedCategory = 'xss'"
-            :class="selectedCategory === 'xss' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'xss' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             XSS
         </button>
         <button @click="selectedCategory = 'path_traversal'"
-            :class="selectedCategory === 'path_traversal' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'path_traversal' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             Path Traversal
         </button>
         <button @click="selectedCategory = 'bot_attack'"
-            :class="selectedCategory === 'bot_attack' ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
+            :class="selectedCategory === 'bot_attack' ? 'bg-[#1D5CE0] text-white' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/60'"
             class="px-3 py-1.5 rounded-lg text-xs font-medium transition-colors">
             Bad Bots
         </button>
@@ -206,7 +206,7 @@
                     <button type="button" @click="showModal = false" class="px-3.5 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 rounded-lg text-xs font-medium">
                         Batal
                     </button>
-                    <button type="submit" class="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 rounded-lg text-xs font-medium">
+                    <button type="submit" class="px-4 py-2 btn-brand rounded-lg text-xs font-medium">
                         Simpan Rule
                     </button>
                 </div>

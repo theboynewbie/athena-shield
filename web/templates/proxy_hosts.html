@@ -21,7 +21,7 @@
                 <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-2.5 text-zinc-400 text-xs"></i>
             </div>
             <button @click="openModal()"
-                class="px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-medium rounded-lg flex items-center gap-2 transition-colors shrink-0">
+                class="px-3.5 py-2 btn-brand text-xs font-medium rounded-lg flex items-center gap-2 transition-colors shrink-0">
                 <i class="fa-solid fa-plus text-[11px]"></i>
                 <span>New Proxy Host</span>
             </button>
@@ -345,7 +345,7 @@
                         Cancel
                     </button>
                     <button type="submit" :disabled="isDeploying"
-                        class="px-4 py-2 rounded-lg text-xs font-medium bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 disabled:opacity-50">
+                        class="px-4 py-2 rounded-lg text-xs font-medium btn-brand disabled:opacity-50">
                         <span x-text="isDeploying ? `Deploying (${deployProgress}%)...` : 'Deploy'"></span>
                     </button>
                 </div>

@@ -81,7 +81,7 @@
                     <template x-for="item in stats.attack_breakdown" :key="item.reason">
                         <div class="py-2.5 flex items-center justify-between text-xs gap-3">
                             <span class="text-zinc-700 dark:text-zinc-300 truncate" x-text="item.reason"></span>
-                            <span class="text-rose-600 dark:text-rose-400 font-medium tabular-nums shrink-0" x-text="item.count + ' hits'"></span>
+                            <span class="text-[#D45B1F] dark:text-[#F5973E] font-medium tabular-nums shrink-0" x-text="item.count + ' hits'"></span>
                         </div>
                     </template>
                     <div x-show="!stats.attack_breakdown || stats.attack_breakdown.length === 0" class="py-10 text-center text-zinc-400 text-xs">
@@ -91,7 +91,7 @@
             </div>
             <div class="mt-4 pt-3 border-t border-zinc-100 dark:border-zinc-800 text-xs text-zinc-500 flex items-center justify-between">
                 <span>Engine: Running</span>
-                <a href="/rules" class="text-zinc-900 dark:text-white hover:underline font-medium">Rules &rarr;</a>
+                <a href="/rules" class="text-[#1D5CE0] dark:text-[#78A6FF] hover:underline font-medium">Rules &rarr;</a>
             </div>
         </div>
     </div>
@@ -242,12 +242,12 @@ function dashboardApp() {
             const ctx = canvas.getContext('2d');
 
             const gradClean = ctx.createLinearGradient(0, 0, 0, 260);
-            gradClean.addColorStop(0, 'rgba(16, 185, 129, 0.12)');
-            gradClean.addColorStop(1, 'rgba(16, 185, 129, 0.00)');
+            gradClean.addColorStop(0, 'rgba(29, 92, 224, 0.14)');
+            gradClean.addColorStop(1, 'rgba(29, 92, 224, 0.00)');
 
             const gradBlocked = ctx.createLinearGradient(0, 0, 0, 260);
-            gradBlocked.addColorStop(0, 'rgba(244, 63, 94, 0.14)');
-            gradBlocked.addColorStop(1, 'rgba(244, 63, 94, 0.00)');
+            gradBlocked.addColorStop(0, 'rgba(232, 118, 46, 0.16)');
+            gradBlocked.addColorStop(1, 'rgba(232, 118, 46, 0.00)');
 
             this.chartInstance = new Chart(ctx, {
                 type: 'line',
@@ -257,26 +257,26 @@ function dashboardApp() {
                         {
                             label: 'Clean Proxied',
                             data: this.stats.chart.clean || [],
-                            borderColor: '#10b981',
+                            borderColor: '#1D5CE0',
                             backgroundColor: gradClean,
                             fill: true,
                             tension: 0.3,
                             borderWidth: 1.75,
                             pointRadius: 0,
                             pointHoverRadius: 4,
-                            pointBackgroundColor: '#10b981'
+                            pointBackgroundColor: '#1D5CE0'
                         },
                         {
                             label: 'Attacks Blocked',
                             data: this.stats.chart.blocked || [],
-                            borderColor: '#f43f5e',
+                            borderColor: '#E8762E',
                             backgroundColor: gradBlocked,
                             fill: true,
                             tension: 0.3,
                             borderWidth: 1.75,
                             pointRadius: 0,
                             pointHoverRadius: 4,
-                            pointBackgroundColor: '#f43f5e'
+                            pointBackgroundColor: '#E8762E'
                         }
                     ]
                 },
