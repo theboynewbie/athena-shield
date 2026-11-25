@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Enterprise Web Application Firewall (WAF), Reverse Proxy HTTP/HTTPS/HTTP2, Load Balancer &amp; Edge Cache</strong><br>
-  Ditulis ulang sepenuhnya dalam <strong>Pure Go</strong> (1 binary statis, 1 container Docker) sebagai penerus performa tinggi dari Guardian WAF.
+  Ditulis sepenuhnya dalam <strong>Pure Go</strong> (1 binary statis, 1 container Docker) untuk proteksi aplikasi web skala enterprise dengan latensi ultra-rendah.
 </p>
 
 ---
