@@ -58,10 +58,16 @@ func main() {
 	}
 	rt.SetRenderer(webSrv)
 
+	proxyWriteTimeout := time.Duration(cfg.UpstreamTimeoutSec+15) * time.Second
+
 	httpSrv := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           tlsMgr.HTTPChallengeHandler(rt),
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      proxyWriteTimeout,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	httpsSrv := &http.Server{
@@ -73,12 +79,20 @@ func main() {
 			NextProtos:     []string{"h2", "http/1.1"},
 		},
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      proxyWriteTimeout,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	dashSrv := &http.Server{
 		Addr:              cfg.DashboardBindAddr + ":" + cfg.DashboardPort,
 		Handler:           webSrv.Handler(),
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 	if cfg.DashboardTLSCert != "" && cfg.DashboardTLSKey != "" {
 		dashSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}

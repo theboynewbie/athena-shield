@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -32,6 +33,7 @@ type Config struct {
 	DashboardBindAddr   string
 	DashboardTLSCert    string
 	DashboardTLSKey     string
+	UpstreamInsecureTLS bool
 }
 
 func Load() Config {
@@ -49,7 +51,7 @@ func Load() Config {
 		DefaultAdminUser:    getEnv("DEFAULT_ADMIN_USER", ""),
 		DefaultAdminEmail:   getEnv("DEFAULT_ADMIN_EMAIL", ""),
 		DefaultAdminPass:    getEnv("DEFAULT_ADMIN_PASSWORD", ""),
-		UpstreamTimeoutSec:  getEnvInt("UPSTREAM_TIMEOUT_SECONDS", 1200),
+		UpstreamTimeoutSec:  getEnvInt("UPSTREAM_TIMEOUT_SECONDS", 120),
 		RateLimitMaxReq:     getEnvInt("RATE_LIMIT_MAX_REQUESTS", 600),
 		RateLimitWindowSec:  getEnvInt("RATE_LIMIT_WINDOW_SECONDS", 60),
 		LoginLimitMax:       getEnvInt("WP_LOGIN_LIMIT_MAX", 12),
@@ -65,6 +67,7 @@ func Load() Config {
 		DashboardBindAddr:   getEnv("DASHBOARD_BIND_ADDR", ""),
 		DashboardTLSCert:    getEnv("DASHBOARD_TLS_CERT", ""),
 		DashboardTLSKey:     getEnv("DASHBOARD_TLS_KEY", ""),
+		UpstreamInsecureTLS: getEnvBool("UPSTREAM_INSECURE_TLS", false),
 	}
 }
 
@@ -82,4 +85,16 @@ func getEnvInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+func getEnvBool(key string, fallback bool) bool {
+	v := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch v {
+	case "1", "true", "yes":
+		return true
+	case "0", "false", "no":
+		return false
+	default:
+		return fallback
+	}
 }

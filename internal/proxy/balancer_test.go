@@ -1,6 +1,10 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/gzip"
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -54,5 +58,39 @@ func TestParseUpstreamPoolAndRoundRobin(t *testing.T) {
 	pool.targets[1].MarkHealthy()
 	if n := pool.Next(); n == nil || n.Raw != "http://10.0.0.2:80" {
 		t.Fatalf("expected recovered node 2 to be selected, got %v", n)
+	}
+}
+
+func TestDecompressGzipCappedAndPublicReason(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	payload := strings.Repeat("SELECT * FROM users; ", 40)
+	_, _ = gw.Write([]byte(payload))
+	_ = gw.Close()
+
+	out, err := decompressGzipCapped(buf.Bytes(), 1024)
+	if err != nil {
+		t.Fatalf("decompressGzipCapped: %v", err)
+	}
+	if string(out) != payload {
+		t.Fatalf("unexpected decompressed output len=%d", len(out))
+	}
+
+	// Cap enforcement (anti-gzip-bomb)
+	capped, err := decompressGzipCapped(buf.Bytes(), 32)
+	if err != nil {
+		t.Fatalf("decompressGzipCapped capped: %v", err)
+	}
+	if len(capped) != 32 {
+		t.Fatalf("expected capped len 32, got %d", len(capped))
+	}
+
+	// Public block reason must never expose internal rule names or SQLi snippets
+	r := publicBlockReason("sqli", http.StatusForbidden)
+	if strings.Contains(strings.ToLower(r), "sql") || strings.Contains(strings.ToLower(r), "match") {
+		t.Fatalf("publicBlockReason leaked internal details: %q", r)
+	}
+	if r429 := publicBlockReason("Rate Limiting", http.StatusTooManyRequests); !strings.Contains(r429, "Rate Limit") {
+		t.Fatalf("unexpected 429 public reason: %q", r429)
 	}
 }

@@ -17,6 +17,7 @@ services:
       SECRET_KEY: ""
       TRUSTED_PROXIES: ""
       EDGE_CACHE_MAX_MB: "128"
+      UPSTREAM_INSECURE_TLS: "false"
 
 volumes:
   athena_data:

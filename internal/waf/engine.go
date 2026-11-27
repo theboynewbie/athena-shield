@@ -3,6 +3,7 @@ package waf
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -131,6 +132,9 @@ type Engine struct {
 	adminCacheMu sync.Mutex
 	adminCache   map[string]adminCacheEntry
 	verifyClient *http.Client
+	verifySem    chan struct{}
+	verifyRateMu sync.Mutex
+	verifyRate   map[string][]time.Time
 }
 
 type adminCacheEntry struct {
@@ -152,8 +156,13 @@ func NewEngine(cfg config.Config, s *store.Store, rl *ratelimit.RateLimiter) *En
 		rateLimiter: rl,
 		secret:      sec,
 		adminCache:  make(map[string]adminCacheEntry),
+		verifySem:   make(chan struct{}, 8),
+		verifyRate:  make(map[string][]time.Time),
 		verifyClient: &http.Client{
 			Timeout: 5 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.UpstreamInsecureTLS},
+			},
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
 			},
@@ -308,6 +317,20 @@ func IsStaticAssetPath(p string) bool {
 	return false
 }
 
+func isSafeStaticPath(p string) bool {
+	if !IsStaticAssetPath(p) {
+		return false
+	}
+	cleanP := strings.ToLower(strings.SplitN(p, "?", 2)[0])
+	unsafeSegs := []string{"..", "%2e", ".php", "/.env", "/.git", "xmlrpc", "wp-config", "wp-admin", "wp-login", "/api/", "\\", "%00"}
+	for _, seg := range unsafeSegs {
+		if strings.Contains(cleanP, seg) {
+			return false
+		}
+	}
+	return true
+}
+
 func isSafeStaticQuery(query string) bool {
 	if query == "" {
 		return true
@@ -438,9 +461,19 @@ func (e *Engine) Inspect(r *http.Request, host *store.ProxyHost, bodyBytes []byt
 
 	// 4. Static Asset Fast-Path
 	rawQuery := r.URL.RawQuery
-	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && IsStaticAssetPath(r.URL.Path) && isSafeStaticQuery(rawQuery) {
+	if (r.Method == http.MethodGet || r.Method == http.MethodHead) && isSafeStaticPath(r.URL.Path) && isSafeStaticQuery(rawQuery) {
 		if e.rateLimiter != nil {
-			if banned, rem := e.rateLimiter.IsTempBanned(clientIP); banned {
+			if rateLimitOn {
+				if limited, reason, retry := e.rateLimiter.IsRateLimited(clientIP, r.URL.Path, r.Method, rawQuery); limited {
+					return Decision{
+						Blocked:    true,
+						Reason:     reason,
+						Category:   "Rate Limiting",
+						RetryAfter: retry,
+						Mode:       wafMode,
+					}
+				}
+			} else if banned, rem := e.rateLimiter.IsTempBanned(clientIP); banned {
 				return Decision{
 					Blocked:    true,
 					Reason:     fmt.Sprintf("Auto-Banned: Too many violations/bruteforce (Jail remaining: %ds)", rem),
@@ -693,9 +726,6 @@ func (e *Engine) scanTargets(snap *snapshot, targets []targetPair, skipBodyCats 
 			}
 			for _, v := range variants {
 				if m := rule.Regex.FindString(v); m != "" {
-					if rule.Name == "Malicious Scanner & Bot User-Agents" && (strings.Contains(v, "python-requests/") || strings.Contains(v, "curl/")) && strings.Contains(strings.ToLower(v), "trusted") {
-						continue
-					}
 					snippet := strings.TrimSpace(multiSpaceRe.ReplaceAllString(m, " "))
 					if len(snippet) > 50 {
 						snippet = snippet[:50]
@@ -816,6 +846,35 @@ func (e *Engine) verifyWPAdminSession(r *http.Request, host *store.ProxyHost) bo
 		return ent.ok
 	}
 	e.adminCacheMu.Unlock()
+
+	// Bound uncached upstream admin session probes per IP and globally
+	clientIP := geoip.GetClientIP(r)
+	now := time.Now()
+	cutoff := now.Add(-60 * time.Second)
+	e.verifyRateMu.Lock()
+	if len(e.verifyRate) > 1000 {
+		e.verifyRate = make(map[string][]time.Time)
+	}
+	var kept []time.Time
+	for _, t := range e.verifyRate[clientIP] {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) >= 5 {
+		e.verifyRate[clientIP] = kept
+		e.verifyRateMu.Unlock()
+		return false
+	}
+	e.verifyRate[clientIP] = append(kept, now)
+	e.verifyRateMu.Unlock()
+
+	select {
+	case e.verifySem <- struct{}{}:
+		defer func() { <-e.verifySem }()
+	default:
+		return false
+	}
 
 	upstream := strings.TrimRight(host.TargetUpstream, "/") + "/wp-admin/options-general.php"
 	req, err := http.NewRequest(http.MethodGet, upstream, nil)

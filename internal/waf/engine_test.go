@@ -347,3 +347,53 @@ func TestBotFingerprintAndGeoIPBlock(t *testing.T) {
 		t.Fatalf("expected KP country to be blocked by GeoIP Shield, got %+v", dec)
 	}
 }
+
+func TestSprintBWAFBypassFixes(t *testing.T) {
+	eng, s, _ := setupTestEngine(t)
+	host := &store.ProxyHost{DomainName: "kampus.ac.id", WAFEnabled: true, WAFMode: "active", RateLimitEnabled: true, AppProfile: "universal", BlockBadBots: true, IsActive: true}
+
+	// 1. /.env/a.js must NOT bypass via static asset fast-path
+	reqEnvJS := makeReq("GET", "http://kampus.ac.id/.env/a.js", "", nil, "")
+	if dec := eng.Inspect(reqEnvJS, host, nil); !dec.Blocked {
+		t.Fatalf("expected /.env/a.js to be blocked (no static fast-path bypass)")
+	}
+
+	// 2. Static asset flood (/assets/app.js) is rate-limited when exceeding RateLimitMaxReq
+	cfgRL := config.Load()
+	cfgRL.RateLimitMaxReq = 3
+	rlStatic := ratelimit.New(cfgRL, s, nil)
+	engStatic := NewEngine(cfgRL, s, rlStatic)
+	reqAsset := makeReq("GET", "http://kampus.ac.id/assets/app.js", "", nil, "")
+	reqAsset.RemoteAddr = "198.51.100.123:5555"
+	for i := 0; i < 3; i++ {
+		if dec := engStatic.Inspect(reqAsset, host, nil); dec.Blocked {
+			t.Fatalf("unexpected static rate limit on req %d: %+v", i+1, dec)
+		}
+	}
+	if dec := engStatic.Inspect(reqAsset, host, nil); !dec.Blocked || dec.Category != "Rate Limiting" {
+		t.Fatalf("expected 4th static asset request to be rate-limited, got %+v", dec)
+	}
+
+	// 3. UA bypass "sqlmap curl/ trusted" must be BLOCKED
+	reqSQLMapBypass := makeReq("GET", "http://kampus.ac.id/", "sqlmap curl/ trusted", nil, "")
+	if dec := eng.Inspect(reqSQLMapBypass, host, nil); !dec.Blocked {
+		t.Fatalf("expected 'sqlmap curl/ trusted' UA to be blocked")
+	}
+
+	// 4. Legitimate curl/ and python-requests/ allowed at PL1, detected at PL3
+	reqCurl := makeReq("GET", "http://kampus.ac.id/api/health", "curl/8.4.0", nil, "")
+	if dec := eng.Inspect(reqCurl, host, nil); dec.Blocked {
+		t.Fatalf("expected curl/8.4.0 to be allowed at PL1, got %+v", dec)
+	}
+	reqPy := makeReq("GET", "http://kampus.ac.id/api/health", "python-requests/2.31.0", nil, "")
+	if dec := eng.Inspect(reqPy, host, nil); dec.Blocked {
+		t.Fatalf("expected python-requests/2.31.0 to be allowed at PL1, got %+v", dec)
+	}
+
+	_ = s.UpdateSettings(map[string]string{"waf_paranoia_level": "3"})
+	eng.Reload()
+	decCurlPL3 := eng.Inspect(reqCurl, host, nil)
+	if decCurlPL3.AnomalyScore < 3 || len(decCurlPL3.MatchedRules) == 0 {
+		t.Fatalf("expected curl/ to be scored at PL3, got %+v", decCurlPL3)
+	}
+}

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
@@ -87,7 +88,7 @@ func NewRouter(
 		ExpectContinueTimeout: 1 * time.Second,
 		ResponseHeaderTimeout: time.Duration(cfg.UpstreamTimeoutSec) * time.Second,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: cfg.UpstreamInsecureTLS,
 			ClientSessionCache: tls.NewLRUClientSessionCache(256),
 		},
 	}
@@ -271,6 +272,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ua := r.Header.Get("User-Agent")
 	cfCountry := r.Header.Get("CF-IPCountry")
 	fullURI := r.URL.RequestURI()
+	incID := newIncidentID()
+	reqID := "ATH-" + incID
+	w.Header().Set("X-Request-ID", reqID)
 
 	// JS Proof-of-Work Challenge Verification Endpoint
 	if r.URL.Path == waf.ChallengeVerifyPath && r.Method == http.MethodPost {
@@ -296,9 +300,10 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only read body if request actually has a payload (skip allocation on GET/HEAD/OPTIONS)
+	// Read request body whenever a payload is present (including GET/HEAD/OPTIONS with Content-Length > 0 or chunked)
 	var bodyBytes []byte
-	if r.Body != nil && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions && r.ContentLength != 0 {
+	hasBodyPayload := r.ContentLength > 0 || len(r.TransferEncoding) > 0 || (r.ContentLength != 0 && r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions)
+	if r.Body != nil && hasBodyPayload {
 		maxInspect := int64(rt.cfg.MaxNonMultipartBody + 1)
 		if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
 			maxInspect = int64(rt.cfg.MaxInspectBodyBytes)
@@ -339,9 +344,9 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if dec.Category == "Rate Limiting" {
 				statusCode = http.StatusTooManyRequests
 			}
-			rt.logEvent(clientIP, r.Method, r.URL.Path, statusCode, true, dec.Reason, ua, host.DomainName, cfCountry)
+			rt.logEvent(clientIP, r.Method, r.URL.Path, statusCode, true, dec.Reason+" [Incident: "+reqID+"]", ua, host.DomainName, cfCountry)
 			if rt.notifier != nil && dec.Category != "Rate Limiting" && dec.Category != "bot_attack" {
-				rt.notifier.Notify("attack", fmt.Sprintf("Serangan Diblokir [%s]", dec.Category), host.DomainName, clientIP, fullURI, dec.Reason)
+				rt.notifier.Notify("attack", fmt.Sprintf("Serangan Diblokir [%s]", dec.Category), host.DomainName, clientIP, fullURI, dec.Reason+" [Incident: "+reqID+"]")
 			}
 
 			w.Header().Set("X-Protected-By", "Athena-Shield-v1.0")
@@ -355,15 +360,12 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("X-RateLimit-Remaining", "0")
 			}
 
-			incBuf := make([]byte, 5)
-			_, _ = rand.Read(incBuf)
-			incID := strings.ToUpper(hex.EncodeToString(incBuf))
 			wib := time.Now().In(time.FixedZone("WIB", 7*3600)).Format("02/01/2006, 15:04:05 WIB")
 
 			if rt.renderer != nil {
 				rt.renderer.RenderBlocked(w, BlockPageData{
 					ClientIP:     clientIP,
-					Reason:       dec.Reason,
+					Reason:       publicBlockReason(dec.Category, statusCode),
 					URI:          fullURI,
 					IncidentID:   incID,
 					StatusCode:   statusCode,
@@ -372,7 +374,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					TimestampStr: wib,
 				})
 			} else {
-				http.Error(w, dec.Reason, statusCode)
+				http.Error(w, "Access Denied (Incident: "+reqID+")", statusCode)
 			}
 			return
 		}
@@ -447,6 +449,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			pr.Out.Header.Set("X-Forwarded-Host", host.DomainName)
 			pr.Out.Header.Set("X-Forwarded-For", clientIP)
 			pr.Out.Header.Set("X-Real-IP", clientIP)
+			pr.Out.Header.Set("X-Request-ID", reqID)
 			pr.Out.Header.Set("X-Forwarded-Proto", fwdProto)
 			pr.Out.Header.Set("X-Forwarded-Port", fwdPort)
 			if isHTTPS {
@@ -467,7 +470,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				setSecurityHeaders(resp.Header)
 			}
 
-			if resp.StatusCode >= 500 && resp.StatusCode <= 504 && ch.pool.Len() > 1 {
+			if (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout) && ch.pool.Len() > 1 {
 				chosen.MarkUnhealthy(15 * time.Second)
 			}
 
@@ -481,7 +484,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			ce := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Encoding")))
-			needDLP := dec.Mode != "bypass" && (ce == "" || ce == "identity") && waf.IsDLPInspectableContentType(ct)
+			needDLP := dec.Mode != "bypass" && (ce == "" || ce == "identity" || ce == "gzip") && waf.IsDLPInspectableContentType(ct)
 			canCache := useEdgeCache && resp.StatusCode == http.StatusOK && (isStatic || strings.Contains(ctLower, "text/html"))
 
 			dlpBlocked := false
@@ -509,32 +512,43 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 
 				if needDLP && len(body) > 0 {
-					dlpDec := rt.engine.InspectResponse(resp.StatusCode, ct, body, &host)
-					if dlpDec.Blocked {
-						if dlpDec.Mode == "monitor" {
-							dlpMonitor = true
-							rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "[DLP-MONITOR] "+dlpDec.Reason, ua, host.DomainName, cfCountry)
+					dlpInput := body
+					if ce == "gzip" {
+						if decBytes, gzErr := decompressGzipCapped(body, int64(waf.MaxDLPInspectBytes)); gzErr == nil && len(decBytes) > 0 {
+							dlpInput = decBytes
 						} else {
-							dlpBlocked = true
-							rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusForbidden, true, dlpDec.Reason, ua, host.DomainName, cfCountry)
-							if rt.notifier != nil {
-								rt.notifier.Notify("attack", fmt.Sprintf("DLP Diblokir [%s]", dlpDec.Category), host.DomainName, clientIP, fullURI, dlpDec.Reason)
-							}
-							var safeBody []byte
-							if strings.Contains(strings.ToLower(ct), "json") {
-								resp.Header.Set("Content-Type", "application/json; charset=utf-8")
-								safeBody = []byte(`{"error":"Response blocked by Athena Shield DLP Policy","code":403}`)
+							dlpInput = nil
+						}
+					}
+					if len(dlpInput) > 0 {
+						dlpDec := rt.engine.InspectResponse(resp.StatusCode, ct, dlpInput, &host)
+						if dlpDec.Blocked {
+							if dlpDec.Mode == "monitor" {
+								dlpMonitor = true
+								rt.logEvent(clientIP, r.Method, r.URL.Path, resp.StatusCode, false, "[DLP-MONITOR] "+dlpDec.Reason+" [Incident: "+reqID+"]", ua, host.DomainName, cfCountry)
 							} else {
-								resp.Header.Set("Content-Type", "text/html; charset=utf-8")
-								safeBody = []byte(`<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>403 — Athena Shield DLP</h1><p>Response disembunyikan oleh kebijakan Data Loss Prevention.</p></div>`)
+								dlpBlocked = true
+								rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusForbidden, true, dlpDec.Reason+" [Incident: "+reqID+"]", ua, host.DomainName, cfCountry)
+								if rt.notifier != nil {
+									rt.notifier.Notify("attack", fmt.Sprintf("DLP Diblokir [%s]", dlpDec.Category), host.DomainName, clientIP, fullURI, dlpDec.Reason+" [Incident: "+reqID+"]")
+								}
+								var safeBody []byte
+								if strings.Contains(strings.ToLower(ct), "json") {
+									resp.Header.Set("Content-Type", "application/json; charset=utf-8")
+									safeBody = []byte(`{"error":"Response blocked by Athena Shield DLP Policy","code":403,"incident_id":"` + reqID + `"}`)
+								} else {
+									resp.Header.Set("Content-Type", "text/html; charset=utf-8")
+									safeBody = []byte(fmt.Sprintf(`<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>403 — Athena Shield DLP</h1><p>Response disembunyikan oleh kebijakan Data Loss Prevention.</p><p style="color:#a1a1aa;font-size:12px;">Incident ID: %s</p></div>`, html.EscapeString(reqID)))
+								}
+								resp.Header.Del("Content-Encoding")
+								resp.StatusCode = http.StatusForbidden
+								resp.Status = "403 Forbidden"
+								resp.Header.Set("X-Athena-DLP", "BLOCKED")
+								resp.Body = io.NopCloser(bytes.NewReader(safeBody))
+								resp.ContentLength = int64(len(safeBody))
+								resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(safeBody)))
+								return nil
 							}
-							resp.StatusCode = http.StatusForbidden
-							resp.Status = "403 Forbidden"
-							resp.Header.Set("X-Athena-DLP", "BLOCKED")
-							resp.Body = io.NopCloser(bytes.NewReader(safeBody))
-							resp.ContentLength = int64(len(safeBody))
-							resp.Header.Set("Content-Length", fmt.Sprintf("%d", len(safeBody)))
-							return nil
 						}
 					}
 				}
@@ -560,13 +574,13 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				status = http.StatusGatewayTimeout
 				kindTitle = "504 Gateway Timeout — Backend Lambat / Hang"
 			}
-			rt.logEvent(clientIP, req.Method, req.URL.Path, status, false, fmt.Sprintf("Upstream Gateway Error (%s): %v", chosen.Raw, proxyErr), ua, host.DomainName, cfCountry)
+			rt.logEvent(clientIP, req.Method, req.URL.Path, status, false, fmt.Sprintf("Upstream Gateway Error (%s): %v [Incident: %s]", chosen.Raw, proxyErr, reqID), ua, host.DomainName, cfCountry)
 			if rt.notifier != nil {
-				rt.notifier.Notify("upstream_down", kindTitle, host.DomainName, clientIP, req.URL.Path, proxyErr.Error())
+				rt.notifier.Notify("upstream_down", kindTitle, host.DomainName, clientIP, req.URL.Path, proxyErr.Error()+" [Incident: "+reqID+"]")
 			}
 			rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 			rw.WriteHeader(status)
-			_, _ = fmt.Fprintf(rw, `<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>%d — Athena Shield</h1><p>Upstream <code>%s</code> error: %s</p></div>`, status, html.EscapeString(chosen.Raw), html.EscapeString(proxyErr.Error()))
+			_, _ = fmt.Fprintf(rw, `<div style="font-family:sans-serif;text-align:center;padding:60px 20px;background:#09090b;color:#fafafa;min-height:100vh;"><h1>%d — Athena Shield</h1><p>Layanan backend sedang tidak tersedia atau mengalami timeout.</p><p style="color:#a1a1aa;font-size:12px;">Incident ID: %s</p></div>`, status, html.EscapeString(reqID))
 		},
 	}
 
@@ -612,4 +626,33 @@ func setSecurityHeaders(h http.Header) {
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("X-XSS-Protection", "1; mode=block")
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+}
+
+func newIncidentID() string {
+	buf := make([]byte, 5)
+	_, _ = rand.Read(buf)
+	return strings.ToUpper(hex.EncodeToString(buf))
+}
+
+func publicBlockReason(category string, statusCode int) string {
+	if statusCode == http.StatusTooManyRequests {
+		return "Rate Limit Exceeded (Permintaan melebihi batas keamanan)"
+	}
+	switch category {
+	case "GeoIP Block":
+		return "Access Restricted by Geographic Policy"
+	case "IP Blacklist":
+		return "Access Denied by IP Security Policy"
+	default:
+		return "Request Blocked by Security Policy"
+	}
+}
+
+func decompressGzipCapped(data []byte, limit int64) ([]byte, error) {
+	gr, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer gr.Close()
+	return io.ReadAll(io.LimitReader(gr, limit))
 }

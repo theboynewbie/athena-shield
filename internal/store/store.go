@@ -276,7 +276,7 @@ func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
 				name: "Malicious Scanner & Bot User-Agents",
 				desc: "Deteksi scanner otomatis seperti Nikto, SQLmap, Acunetix, Masscan, DirBuster, WPScan",
 				cat:  "bot_attack",
-				pat:  `(sqlmap|nikto|acunetix|havij|nessus|masscan|dirbuster|nmap|zgrab|gobuster|wpscan|censys|shodan|python-requests/|curl/|libwww-perl)`,
+				pat:  `(sqlmap|nikto|acunetix|havij|nessus|masscan|dirbuster|nmap|zgrab|gobuster|wpscan|censys|shodan)`,
 				sev:  "CRITICAL", score: 5, pl: 1,
 			},
 			{
@@ -326,6 +326,13 @@ func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
 				desc: "Deteksi GraphQL schema introspection & abuse probing (__schema, __type, IntrospectionQuery) untuk Paranoia Level 3+",
 				cat:  "custom",
 				pat:  `(__schema|__type\s*\(|introspectionquery)`,
+				sev:  "WARNING", score: 3, pl: 3,
+			},
+			{
+				name: "CLI HTTP Clients & Scripting Agents (PL3)",
+				desc: "Deteksi scripting HTTP client (curl, python-requests, libwww-perl, Go-http-client) untuk Paranoia Level 3+",
+				cat:  "bot_attack",
+				pat:  `(python-requests/|curl/|libwww-perl|go-http-client/)`,
 				sev:  "WARNING", score: 3, pl: 3,
 			},
 		}
