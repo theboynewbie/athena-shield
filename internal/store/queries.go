@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -11,7 +12,54 @@ import (
 	"time"
 )
 
-// ---- Users ----
+// ---- Users & Initial Setup ----
+
+var ErrSetupAlreadyCompleted = errors.New("initial setup already completed")
+
+func (s *Store) NeedsSetup() bool {
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return false
+	}
+	return count == 0
+}
+
+func (s *Store) CreateInitialSuperAdmin(username, email, hashedPass string) (*User, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count > 0 {
+		return nil, ErrSetupAlreadyCompleted
+	}
+
+	now := time.Now().UTC()
+	res, err := tx.Exec(
+		`INSERT INTO users (username, email, hashed_password, role, is_active, created_at) VALUES (?, ?, ?, 'super_admin', 1, ?)`,
+		username, email, hashedPass, now,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return &User{
+		ID:        id,
+		Username:  username,
+		Email:     email,
+		Role:      "super_admin",
+		IsActive:  true,
+		CreatedAt: now,
+	}, nil
+}
 
 func (s *Store) GetUserByUsernameOrEmail(ident string) (*User, error) {
 	u := &User{}

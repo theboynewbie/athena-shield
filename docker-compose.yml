@@ -14,8 +14,6 @@ services:
       TZ: Asia/Jakarta
       ACME_EMAIL: admin@example.com
       SECRET_KEY: ""
-      DEFAULT_ADMIN_USER: admin
-      DEFAULT_ADMIN_PASSWORD: GuardianWAF@2026
 
 volumes:
   athena_data:

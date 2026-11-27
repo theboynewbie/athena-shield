@@ -39,9 +39,9 @@
 1. Buka **Portainer** &rarr; **Stacks** &rarr; **Add stack**.
 2. Beri nama stack (misalnya `athena-shield`).
 3. Pilih **Repository** (arahkan ke `https://github.com/theboynewbie/athena-shield.git`, branch `main`) **atau** paste isi `docker-compose.yml` ke Web Editor.
-4. Atur environment variable sesuai kebutuhan (`ACME_EMAIL`, `DEFAULT_ADMIN_USER`, dan `DEFAULT_ADMIN_PASSWORD` yang kuat). Biarkan `SECRET_KEY` kosong agar kunci sesi 256-bit di-generate acak otomatis per server.
+4. Atur environment variable sesuai kebutuhan (seperti `ACME_EMAIL`). Biarkan `SECRET_KEY` kosong agar kunci sesi 256-bit di-generate acak otomatis per server.
 5. Klik **Deploy the stack**.
-6. Akses dashboard melalui `http://<IP-SERVER>:1081/login` menggunakan kredensial yang telah Anda konfigurasikan pada environment variable, lalu aktifkan **2FA Authenticator** di menu **Settings & Backup**.
+6. Buka `http://<IP-SERVER>:1081` — **Initial Setup Wizard (`/setup`)** akan otomatis muncul untuk membuat akun **Super Admin** pertama Anda dan langsung masuk ke dashboard. Setelah selesai, halaman `/setup` otomatis terkunci permanen. Aktifkan juga **2FA Authenticator** di menu **Settings & Backup**.
 
 ### Migrasi dari Guardian WAF
 Masuk ke menu **Settings & Backup** di Athena Shield lalu upload file `.json` hasil export dari Guardian WAF. Seluruh Proxy Host, SSL Custom, Rules, IP Whitelist/Blacklist, dan pengaturan Telegram akan langsung dipulihkan.

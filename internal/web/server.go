@@ -2,9 +2,11 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"html/template"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -67,7 +69,7 @@ func NewServer(
 	}
 
 	pageNames := []string{
-		"login.html", "dashboard.html", "proxy_hosts.html",
+		"setup.html", "login.html", "dashboard.html", "proxy_hosts.html",
 		"rules.html", "logs.html", "users.html", "settings.html", "error_403.html",
 	}
 	pages := make(map[string]*template.Template, len(pageNames))
@@ -132,8 +134,14 @@ func (sv *Server) registerRoutes() {
 	sv.mux.HandleFunc("GET /metrics", sv.handleMetrics)
 
 	sv.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/dashboard", http.StatusFound)
 	})
+	sv.mux.HandleFunc("GET /setup", sv.handleSetupPage)
+	sv.mux.HandleFunc("POST /setup", sv.handleSetupSubmit)
 	sv.mux.HandleFunc("GET /login", sv.handleLoginPage)
 	sv.mux.HandleFunc("POST /login", sv.handleLoginSubmit)
 	sv.mux.HandleFunc("GET /logout", sv.handleLogout)
@@ -243,8 +251,115 @@ func (sv *Server) requireSuperAdminAPI(next authedHandler) http.HandlerFunc {
 	})
 }
 
+var setupUsernameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]{3,32}$`)
+
+func (sv *Server) handleSetupPage(w http.ResponseWriter, r *http.Request) {
+	applyLoginSecurityHeaders(w)
+	if !sv.store.NeedsSetup() {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	clientIP := geoip.GetClientIP(r)
+	sv.renderPage(w, "setup.html", http.StatusOK, pageData{
+		CSRFToken: sv.auth.GenerateCSRF(clientIP),
+	})
+}
+
+func (sv *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
+	applyLoginSecurityHeaders(w)
+	if !sv.store.NeedsSetup() {
+		http.Error(w, "Initial setup already completed", http.StatusForbidden)
+		return
+	}
+	clientIP := geoip.GetClientIP(r)
+	_ = r.ParseForm()
+	username := strings.TrimSpace(r.FormValue("username"))
+	email := strings.TrimSpace(r.FormValue("email"))
+	password := r.FormValue("password")
+	confirm := r.FormValue("confirm_password")
+	csrfToken := r.FormValue("csrf_token")
+
+	if !sv.auth.VerifyCSRF(csrfToken, clientIP) {
+		sv.renderPage(w, "setup.html", http.StatusForbidden, pageData{
+			Error:     "Token keamanan CSRF tidak valid atau kedaluwarsa. Silakan refresh halaman.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+
+	if !setupUsernameRe.MatchString(username) {
+		sv.renderPage(w, "setup.html", http.StatusBadRequest, pageData{
+			Error:     "Username harus 3–32 karakter (huruf, angka, titik, garis bawah, atau strip).",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+	if len(email) > 120 || !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+		sv.renderPage(w, "setup.html", http.StatusBadRequest, pageData{
+			Error:     "Format alamat email tidak valid.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+	if len(password) < 8 || len(password) > 128 {
+		sv.renderPage(w, "setup.html", http.StatusBadRequest, pageData{
+			Error:     "Password minimal 8 karakter dan maksimal 128 karakter.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+	if password != confirm {
+		sv.renderPage(w, "setup.html", http.StatusBadRequest, pageData{
+			Error:     "Konfirmasi password tidak cocok.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		sv.renderPage(w, "setup.html", http.StatusInternalServerError, pageData{
+			Error:     "Gagal memproses enkripsi password.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+
+	u, err := sv.store.CreateInitialSuperAdmin(username, email, hash)
+	if err != nil {
+		if errors.Is(err, store.ErrSetupAlreadyCompleted) {
+			http.Error(w, "Initial setup already completed", http.StatusForbidden)
+			return
+		}
+		sv.renderPage(w, "setup.html", http.StatusBadRequest, pageData{
+			Error:     "Gagal membuat akun Super Admin pertama.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+
+	sv.recordAudit(r, u, "INITIAL_SETUP", u.Username, "Akun Super Admin pertama dibuat melalui Initial Setup Wizard")
+
+	tok, _ := sv.auth.CreateToken(u.Username, u.Role)
+	isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     "access_token",
+		Value:    "Bearer " + tok,
+		Path:     "/",
+		HttpOnly: true,
+		MaxAge:   int(auth.TokenTTL.Seconds()),
+		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecure,
+	})
+	http.Redirect(w, r, "/dashboard", http.StatusFound)
+}
+
 func (sv *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 	applyLoginSecurityHeaders(w)
+	if sv.store.NeedsSetup() {
+		http.Redirect(w, r, "/setup", http.StatusFound)
+		return
+	}
 	clientIP := geoip.GetClientIP(r)
 	if locked, rem := sv.auth.IsIPLocked(clientIP); locked {
 		sv.renderPage(w, "login.html", http.StatusTooManyRequests, pageData{
@@ -263,6 +378,10 @@ func (sv *Server) handleLoginPage(w http.ResponseWriter, r *http.Request) {
 
 func (sv *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 	applyLoginSecurityHeaders(w)
+	if sv.store.NeedsSetup() {
+		http.Redirect(w, r, "/setup", http.StatusFound)
+		return
+	}
 	clientIP := geoip.GetClientIP(r)
 	if locked, rem := sv.auth.IsIPLocked(clientIP); locked {
 		sv.renderPage(w, "login.html", http.StatusTooManyRequests, pageData{
@@ -425,6 +544,10 @@ func (sv *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
@@ -434,6 +557,10 @@ func (sv *Server) handleDashboardPage(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleProxyHostsPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
@@ -443,6 +570,10 @@ func (sv *Server) handleProxyHostsPage(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleRulesPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
@@ -452,6 +583,10 @@ func (sv *Server) handleRulesPage(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
@@ -461,6 +596,10 @@ func (sv *Server) handleLogsPage(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
@@ -477,6 +616,10 @@ func (sv *Server) handleUsersPage(w http.ResponseWriter, r *http.Request) {
 func (sv *Server) handleSettingsPage(w http.ResponseWriter, r *http.Request) {
 	u := sv.auth.CurrentUser(r)
 	if u == nil {
+		if sv.store.NeedsSetup() {
+			http.Redirect(w, r, "/setup", http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}

@@ -208,21 +208,28 @@ func (s *Store) migrate() error {
 }
 
 func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
-	var userCount int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, adminUser).Scan(&userCount); err != nil {
-		return err
-	}
-	if userCount == 0 {
-		hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
-		if err != nil {
+	adminUser = strings.TrimSpace(adminUser)
+	adminEmail = strings.TrimSpace(adminEmail)
+	if adminUser != "" && strings.TrimSpace(adminPass) != "" {
+		var userCount int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&userCount); err != nil {
 			return err
 		}
-		_, err = s.db.Exec(
-			`INSERT INTO users (username, email, hashed_password, role, is_active, created_at) VALUES (?, ?, ?, 'super_admin', 1, ?)`,
-			adminUser, adminEmail, string(hash), time.Now().UTC(),
-		)
-		if err != nil {
-			return err
+		if userCount == 0 {
+			if adminEmail == "" {
+				adminEmail = adminUser + "@athena-shield.local"
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			_, err = s.db.Exec(
+				`INSERT INTO users (username, email, hashed_password, role, is_active, created_at) VALUES (?, ?, ?, 'super_admin', 1, ?)`,
+				adminUser, adminEmail, string(hash), time.Now().UTC(),
+			)
+			if err != nil {
+				return err
+			}
 		}
 	}
 

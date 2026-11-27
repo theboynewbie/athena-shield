@@ -173,6 +173,120 @@ func TestFormatNICSpeed(t *testing.T) {
 	}
 }
 
+func TestInitialSetupWizardFlow(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(dir, "", "", "")
+	if err != nil {
+		t.Fatalf("open empty store: %v", err)
+	}
+	defer s.Close()
+
+	if !s.NeedsSetup() {
+		t.Fatalf("expected NeedsSetup() == true on fresh empty DB")
+	}
+
+	cfg := config.Load()
+	am := auth.NewManager("test-secret-0123456789abcdef0123456789", s)
+	rl := ratelimit.New(cfg, s, nil)
+	eng := waf.NewEngine(cfg, s, rl)
+	ec := cache.NewEdgeCache()
+	srv, err := NewServer(cfg, s, am, eng, rl, ec, nil, nil)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	h := srv.Handler()
+
+	// 1. GET / and GET /login redirect to /setup
+	for _, p := range []string{"/", "/login", "/dashboard"} {
+		req := httptest.NewRequest("GET", p, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/setup" {
+			t.Fatalf("GET %s expected 302 -> /setup, got %d (%s)", p, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+
+	// 2. GET /setup returns 200 with csrf_token
+	reqGet := httptest.NewRequest("GET", "/setup", nil)
+	reqGet.RemoteAddr = "127.0.0.1:5000"
+	recGet := httptest.NewRecorder()
+	h.ServeHTTP(recGet, reqGet)
+	if recGet.Code != http.StatusOK {
+		t.Fatalf("expected 200 on GET /setup, got %d", recGet.Code)
+	}
+	m := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`).FindStringSubmatch(recGet.Body.String())
+	if len(m) < 2 {
+		t.Fatalf("missing csrf_token on /setup page")
+	}
+	csrf := m[1]
+
+	// 3. Short password rejected with 400 and NeedsSetup stays true
+	badForm := url.Values{
+		"username": {"owner1"}, "email": {"owner@example.com"},
+		"password": {"short"}, "confirm_password": {"short"}, "csrf_token": {csrf},
+	}
+	reqBad := httptest.NewRequest("POST", "/setup", strings.NewReader(badForm.Encode()))
+	reqBad.RemoteAddr = "127.0.0.1:5000"
+	reqBad.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recBad := httptest.NewRecorder()
+	h.ServeHTTP(recBad, reqBad)
+	if recBad.Code != http.StatusBadRequest || !s.NeedsSetup() {
+		t.Fatalf("expected 400 and NeedsSetup==true on short password, got %d", recBad.Code)
+	}
+
+	// Extract fresh CSRF from 400 response
+	m2 := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`).FindStringSubmatch(recBad.Body.String())
+	if len(m2) < 2 {
+		t.Fatalf("missing fresh csrf_token after validation error")
+	}
+
+	// 4. Valid setup -> 302 to /dashboard + access_token cookie + NeedsSetup==false
+	okForm := url.Values{
+		"username": {"owner1"}, "email": {"owner@example.com"},
+		"password": {"StrongPass#2026"}, "confirm_password": {"StrongPass#2026"}, "csrf_token": {m2[1]},
+	}
+	reqOK := httptest.NewRequest("POST", "/setup", strings.NewReader(okForm.Encode()))
+	reqOK.RemoteAddr = "127.0.0.1:5000"
+	reqOK.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recOK := httptest.NewRecorder()
+	h.ServeHTTP(recOK, reqOK)
+	if recOK.Code != http.StatusFound || recOK.Header().Get("Location") != "/dashboard" {
+		t.Fatalf("expected 302 -> /dashboard on valid setup, got %d (%s)", recOK.Code, recOK.Body.String())
+	}
+	if s.NeedsSetup() {
+		t.Fatalf("expected NeedsSetup() == false after initial setup")
+	}
+	cookies := recOK.Result().Cookies()
+	if len(cookies) == 0 || cookies[0].Name != "access_token" {
+		t.Fatalf("expected access_token cookie after setup")
+	}
+
+	// 5. Issued cookie grants immediate access to /api/stats
+	reqAPI := httptest.NewRequest("GET", "/api/stats", nil)
+	reqAPI.AddCookie(cookies[0])
+	recAPI := httptest.NewRecorder()
+	h.ServeHTTP(recAPI, reqAPI)
+	if recAPI.Code != http.StatusOK {
+		t.Fatalf("expected 200 on /api/stats with setup cookie, got %d", recAPI.Code)
+	}
+
+	// 6. Setup endpoint is permanently locked afterwards
+	reqLockGet := httptest.NewRequest("GET", "/setup", nil)
+	recLockGet := httptest.NewRecorder()
+	h.ServeHTTP(recLockGet, reqLockGet)
+	if recLockGet.Code != http.StatusFound || recLockGet.Header().Get("Location") != "/login" {
+		t.Fatalf("expected GET /setup after completion to redirect to /login, got %d", recLockGet.Code)
+	}
+
+	reqLockPost := httptest.NewRequest("POST", "/setup", strings.NewReader(okForm.Encode()))
+	reqLockPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recLockPost := httptest.NewRecorder()
+	h.ServeHTTP(recLockPost, reqLockPost)
+	if recLockPost.Code != http.StatusForbidden {
+		t.Fatalf("expected POST /setup after completion to return 403, got %d", recLockPost.Code)
+	}
+}
+
 func TestScanPCINetDevices(t *testing.T) {
 	dir := t.TempDir()
 	nicDir := filepath.Join(dir, "pci0000_00", "0000_00_1c.0", "0000_02_00.0", "net", "enp2s0")
