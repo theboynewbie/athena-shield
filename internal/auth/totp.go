@@ -44,18 +44,24 @@ func TOTPCode(secret string, ts time.Time) (string, error) {
 	return fmt.Sprintf("%06d", code%1000000), nil
 }
 
-func VerifyTOTP(secret, code string, now time.Time) bool {
+func VerifyTOTPWithStep(secret, code string, now time.Time) (bool, int64) {
 	c := strings.TrimSpace(code)
 	if len(c) != 6 || secret == "" {
-		return false
+		return false, 0
 	}
 	for _, skew := range []time.Duration{-30 * time.Second, 0, 30 * time.Second} {
-		expected, err := TOTPCode(secret, now.Add(skew))
+		ts := now.Add(skew)
+		expected, err := TOTPCode(secret, ts)
 		if err == nil && hmac.Equal([]byte(c), []byte(expected)) {
-			return true
+			return true, ts.Unix() / 30
 		}
 	}
-	return false
+	return false, 0
+}
+
+func VerifyTOTP(secret, code string, now time.Time) bool {
+	ok, _ := VerifyTOTPWithStep(secret, code, now)
+	return ok
 }
 
 func ProvisioningURI(issuer, account, secret string) string {

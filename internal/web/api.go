@@ -66,11 +66,20 @@ func validateSingleURL(u string) (string, error) {
 
 // ---- Proxy Hosts ----
 
+func sanitizeHostForAPI(h store.ProxyHost) store.ProxyHost {
+	h.HasSSLKey = strings.TrimSpace(h.SSLKey) != ""
+	h.SSLKey = ""
+	return h
+}
+
 func (sv *Server) apiListProxyHosts(w http.ResponseWriter, r *http.Request, user *store.User) {
 	hosts, err := sv.store.ListProxyHosts()
 	if err != nil {
 		writeDetailError(w, 500, err.Error())
 		return
+	}
+	for i := range hosts {
+		hosts[i] = sanitizeHostForAPI(hosts[i])
 	}
 	writeJSON(w, http.StatusOK, hosts)
 }
@@ -184,7 +193,7 @@ func (sv *Server) apiCreateProxyHost(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 	sv.recordAudit(r, user, "CREATE_HOST", h.DomainName, "Upstream: "+h.TargetUpstream)
-	writeJSON(w, http.StatusCreated, h)
+	writeJSON(w, http.StatusCreated, sanitizeHostForAPI(*h))
 }
 
 func (sv *Server) apiUpdateProxyHost(w http.ResponseWriter, r *http.Request, user *store.User) {
@@ -243,7 +252,7 @@ func (sv *Server) apiUpdateProxyHost(w http.ResponseWriter, r *http.Request, use
 	if v, ok := in["ssl_cert"].(string); ok {
 		h.SSLCert = v
 	}
-	if v, ok := in["ssl_key"].(string); ok {
+	if v, ok := in["ssl_key"].(string); ok && strings.TrimSpace(v) != "" {
 		h.SSLKey = v
 	}
 	if v, ok := in["force_https"].(bool); ok {
@@ -297,7 +306,7 @@ func (sv *Server) apiUpdateProxyHost(w http.ResponseWriter, r *http.Request, use
 		return
 	}
 	sv.recordAudit(r, user, "UPDATE_HOST", h.DomainName, "Mode: "+h.WAFMode)
-	writeJSON(w, http.StatusOK, h)
+	writeJSON(w, http.StatusOK, sanitizeHostForAPI(*h))
 }
 
 func (sv *Server) apiDeleteProxyHost(w http.ResponseWriter, r *http.Request, user *store.User) {

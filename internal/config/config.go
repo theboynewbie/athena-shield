@@ -26,6 +26,12 @@ type Config struct {
 	AutoBanDurationSec  int
 	MaxInspectBodyBytes int
 	MaxNonMultipartBody int
+	TrustedProxies      string
+	SetupToken          string
+	EdgeCacheMaxMB      int
+	DashboardBindAddr   string
+	DashboardTLSCert    string
+	DashboardTLSKey     string
 }
 
 func Load() Config {
@@ -53,6 +59,12 @@ func Load() Config {
 		AutoBanDurationSec:  getEnvInt("AUTO_BAN_DURATION", 86400),
 		MaxInspectBodyBytes: getEnvInt("MAX_INSPECT_BODY_BYTES", 2*1024*1024),
 		MaxNonMultipartBody: getEnvInt("MAX_NON_MULTIPART_BODY_BYTES", 10*1024*1024),
+		TrustedProxies:      getEnv("TRUSTED_PROXIES", ""),
+		SetupToken:          getEnv("SETUP_TOKEN", ""),
+		EdgeCacheMaxMB:      getEnvInt("EDGE_CACHE_MAX_MB", 128),
+		DashboardBindAddr:   getEnv("DASHBOARD_BIND_ADDR", ""),
+		DashboardTLSCert:    getEnv("DASHBOARD_TLS_CERT", ""),
+		DashboardTLSKey:     getEnv("DASHBOARD_TLS_KEY", ""),
 	}
 }
 

@@ -33,6 +33,7 @@ var dummyBcryptHash = []byte("$2b$12$e8YgK8s8V4p.Wd/jQ7LreO6KjQyqjMhD6LhHk1fM5aZ
 type SessionClaims struct {
 	Sub  string `json:"sub"`
 	Role string `json:"role"`
+	Ver  int    `json:"ver,omitempty"`
 	Exp  int64  `json:"exp"`
 }
 
@@ -46,6 +47,7 @@ type Manager struct {
 	failedUsers    map[string][]time.Time
 	lockedUsers    map[string]time.Time
 	usedCSRFSalts  map[string]time.Time
+	usedTOTPSteps  map[string]int64
 }
 
 func NewManager(secret string, s *store.Store) *Manager {
@@ -57,6 +59,7 @@ func NewManager(secret string, s *store.Store) *Manager {
 		failedUsers:   make(map[string][]time.Time),
 		lockedUsers:   make(map[string]time.Time),
 		usedCSRFSalts: make(map[string]time.Time),
+		usedTOTPSteps: make(map[string]int64),
 	}
 }
 
@@ -73,10 +76,15 @@ func VerifyDummyPassword(plain string) {
 	_ = bcrypt.CompareHashAndPassword(dummyBcryptHash, []byte(plain))
 }
 
-func (m *Manager) CreateToken(username, role string) (string, error) {
+func (m *Manager) CreateToken(username, role string, tokenVersion ...int) (string, error) {
+	ver := 1
+	if len(tokenVersion) > 0 && tokenVersion[0] > 0 {
+		ver = tokenVersion[0]
+	}
 	claims := SessionClaims{
 		Sub:  username,
 		Role: role,
+		Ver:  ver,
 		Exp:  time.Now().Add(TokenTTL).Unix(),
 	}
 	payload, err := json.Marshal(claims)
@@ -142,7 +150,33 @@ func (m *Manager) CurrentUser(r *http.Request) *store.User {
 	if err != nil {
 		return nil
 	}
+	claimVer := claims.Ver
+	if claimVer <= 0 {
+		claimVer = 1
+	}
+	userVer := u.TokenVersion
+	if userVer <= 0 {
+		userVer = 1
+	}
+	if claimVer != userVer {
+		return nil
+	}
 	return u
+}
+
+func (m *Manager) VerifyAndConsumeTOTP(username, secret, code string, now time.Time) bool {
+	ok, step := VerifyTOTPWithStep(secret, code, now)
+	if !ok {
+		return false
+	}
+	key := strings.ToLower(strings.TrimSpace(username))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if lastStep, exists := m.usedTOTPSteps[key]; exists && step <= lastStep {
+		return false
+	}
+	m.usedTOTPSteps[key] = step
+	return true
 }
 
 func (m *Manager) GenerateCSRF(ip string) string {

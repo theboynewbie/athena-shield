@@ -6,6 +6,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      # Restrict dashboard port (e.g. "127.0.0.1:1081:1081") or enable DASHBOARD_TLS_CERT / DASHBOARD_TLS_KEY in production
       - "1081:1081"
     volumes:
       - athena_data:/data
@@ -14,6 +15,8 @@ services:
       TZ: Asia/Jakarta
       ACME_EMAIL: admin@example.com
       SECRET_KEY: ""
+      TRUSTED_PROXIES: ""
+      EDGE_CACHE_MAX_MB: "128"
 
 volumes:
   athena_data:

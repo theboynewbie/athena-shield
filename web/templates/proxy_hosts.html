@@ -248,13 +248,13 @@
                             <div class="flex items-center justify-between mb-2">
                                 <span class="font-medium text-zinc-700 dark:text-zinc-300">Private Key (.key)</span>
                             </div>
-                            <template x-if="form.ssl_key">
+                            <template x-if="form.ssl_key || hasExistingKey">
                                 <div class="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800 rounded-md">
                                     <span class="text-[11px] text-emerald-600 dark:text-emerald-400 truncate" x-text="keyFileName || 'Loaded'"></span>
                                     <button type="button" @click="clearKey()" class="text-[11px] text-rose-600 hover:underline shrink-0 ml-2">Ganti</button>
                                 </div>
                             </template>
-                            <template x-if="!form.ssl_key">
+                            <template x-if="!form.ssl_key && !hasExistingKey">
                                 <label class="flex items-center justify-center p-3 border border-dashed border-zinc-300 dark:border-zinc-700 rounded-md hover:border-zinc-500 cursor-pointer text-zinc-500">
                                     <input type="file" x-ref="keyInput" @change="handleKeyUpload($event)" accept=".key,.pem,text/plain" class="hidden">
                                     <span>Upload .KEY</span>
@@ -380,6 +380,7 @@ function proxyApp() {
         isEdit: false,
         certFileName: '',
         keyFileName: '',
+        hasExistingKey: false,
         showManualPaste: false,
         isDeploying: false,
         deployProgress: 0,
@@ -442,6 +443,7 @@ function proxyApp() {
             this.isEdit = false;
             this.certFileName = '';
             this.keyFileName = '';
+            this.hasExistingKey = false;
             this.showManualPaste = false;
             this.deployProgress = 0;
             this.deployStage = '';
@@ -488,7 +490,8 @@ function proxyApp() {
                 is_active: host.is_active !== undefined ? host.is_active : true
             };
             this.certFileName = host.ssl_cert ? 'Sertifikat SSL (Tersimpan)' : '';
-            this.keyFileName = host.ssl_key ? 'Private Key (Tersimpan)' : '';
+            this.hasExistingKey = Boolean(host.has_ssl_key || host.ssl_key);
+            this.keyFileName = this.hasExistingKey ? 'Private Key (Tersimpan)' : '';
             this.showModal = true;
         },
 
@@ -535,6 +538,7 @@ function proxyApp() {
         clearKey() {
             this.form.ssl_key = '';
             this.keyFileName = '';
+            this.hasExistingKey = false;
             if (this.$refs.keyInput) this.$refs.keyInput.value = '';
         },
 
@@ -552,7 +556,7 @@ function proxyApp() {
                     return;
                 }
             }
-            if (this.form.ssl_type === 'custom' && (!this.form.ssl_cert || !this.form.ssl_key)) {
+            if (this.form.ssl_type === 'custom' && (!this.form.ssl_cert || (!this.form.ssl_key && !this.hasExistingKey))) {
                 alert("Untuk Custom SSL, upload kedua file: SSL Certificate dan Private Key.");
                 return;
             }

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/theboynewbie/athena-shield/internal/auth"
 	"github.com/theboynewbie/athena-shield/internal/cache"
@@ -219,11 +220,35 @@ func TestInitialSetupWizardFlow(t *testing.T) {
 		t.Fatalf("missing csrf_token on /setup page")
 	}
 	csrf := m[1]
+	setupTok := srv.SetupToken()
+	if len(setupTok) != 32 {
+		t.Fatalf("expected 32-char setup token, got %q", setupTok)
+	}
+
+	// 2b. Wrong or missing setup_token rejected with 403 and NeedsSetup stays true
+	badTokForm := url.Values{
+		"setup_token": {"wrong-token"},
+		"username": {"owner1"}, "email": {"owner@example.com"},
+		"password": {"StrongPass#2026"}, "confirm_password": {"StrongPass#2026"}, "csrf_token": {csrf},
+	}
+	reqBadTok := httptest.NewRequest("POST", "/setup", strings.NewReader(badTokForm.Encode()))
+	reqBadTok.RemoteAddr = "127.0.0.1:5000"
+	reqBadTok.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recBadTok := httptest.NewRecorder()
+	h.ServeHTTP(recBadTok, reqBadTok)
+	if recBadTok.Code != http.StatusForbidden || !s.NeedsSetup() {
+		t.Fatalf("expected 403 and NeedsSetup==true on wrong setup_token, got %d", recBadTok.Code)
+	}
+	mTok := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`).FindStringSubmatch(recBadTok.Body.String())
+	if len(mTok) < 2 {
+		t.Fatalf("missing fresh csrf_token after setup_token error")
+	}
 
 	// 3. Short password rejected with 400 and NeedsSetup stays true
 	badForm := url.Values{
+		"setup_token": {setupTok},
 		"username": {"owner1"}, "email": {"owner@example.com"},
-		"password": {"short"}, "confirm_password": {"short"}, "csrf_token": {csrf},
+		"password": {"short"}, "confirm_password": {"short"}, "csrf_token": {mTok[1]},
 	}
 	reqBad := httptest.NewRequest("POST", "/setup", strings.NewReader(badForm.Encode()))
 	reqBad.RemoteAddr = "127.0.0.1:5000"
@@ -242,6 +267,7 @@ func TestInitialSetupWizardFlow(t *testing.T) {
 
 	// 4. Valid setup -> 302 to /dashboard + access_token cookie + NeedsSetup==false
 	okForm := url.Values{
+		"setup_token": {setupTok},
 		"username": {"owner1"}, "email": {"owner@example.com"},
 		"password": {"StrongPass#2026"}, "confirm_password": {"StrongPass#2026"}, "csrf_token": {m2[1]},
 	}
@@ -319,5 +345,122 @@ func TestScanPCINetDevices(t *testing.T) {
 	vName, vLabel, vMbps := scanPCINetDevices(vmDir)
 	if vName != "ens18 (virtio_net)" || vLabel != "VirtIO NIC" || vMbps != 0 {
 		t.Fatalf("got (%q, %q, %d), want (\"ens18 (virtio_net)\", \"VirtIO NIC\", 0)", vName, vLabel, vMbps)
+	}
+}
+
+func TestSprintASecurityHardening(t *testing.T) {
+	srv, s, am := setupTestWebServer(t)
+	h := srv.Handler()
+
+	// 1. SSL Private Key must never be returned by GET /api/proxy-hosts (even to authenticated auditor)
+	err := s.CreateProxyHost(&store.ProxyHost{
+		DomainName:     "secure.example.com",
+		TargetUpstream: "http://10.0.0.10:80",
+		HostType:       "proxy",
+		SSLType:        "custom",
+		SSLCert:        "-----BEGIN CERTIFICATE-----\nCERT\n-----END CERTIFICATE-----",
+		SSLKey:         "-----BEGIN PRIVATE KEY-----\nSUPER_SECRET_KEY\n-----END PRIVATE KEY-----",
+		IsActive:       true,
+	})
+	if err != nil {
+		t.Fatalf("CreateProxyHost: %v", err)
+	}
+
+	hash, _ := auth.HashPassword("AuditorPass#2026")
+	_ = s.CreateUser(&store.User{Username: "auditor_sec", Email: "audsec@test.local", HashedPassword: hash, Role: "auditor", IsActive: true})
+	audTok, _ := am.CreateToken("auditor_sec", "auditor", 1)
+
+	reqHosts := httptest.NewRequest("GET", "/api/proxy-hosts", nil)
+	reqHosts.Header.Set("Authorization", "Bearer "+audTok)
+	recHosts := httptest.NewRecorder()
+	h.ServeHTTP(recHosts, reqHosts)
+	if recHosts.Code != http.StatusOK {
+		t.Fatalf("expected 200 from /api/proxy-hosts, got %d", recHosts.Code)
+	}
+	bodyHosts := recHosts.Body.String()
+	if strings.Contains(bodyHosts, "SUPER_SECRET_KEY") {
+		t.Fatalf("GET /api/proxy-hosts leaked ssl_key to auditor!")
+	}
+	if !strings.Contains(bodyHosts, `"has_ssl_key":true`) {
+		t.Fatalf("expected has_ssl_key:true in response, got %s", bodyHosts)
+	}
+
+	// 2. 2FA setup must be rejected when already enabled
+	sec, _ := auth.GenerateTOTPSecret()
+	adminUser, _ := s.GetUserByUsername("admin")
+	if err := s.SetUserTOTP(adminUser.ID, sec, true); err != nil {
+		t.Fatalf("SetUserTOTP: %v", err)
+	}
+	adminTok, _ := am.CreateToken("admin", "super_admin", adminUser.TokenVersion)
+	req2FA := httptest.NewRequest("POST", "/api/account/2fa/setup", nil)
+	req2FA.Header.Set("Authorization", "Bearer "+adminTok)
+	rec2FA := httptest.NewRecorder()
+	h.ServeHTTP(rec2FA, req2FA)
+	if rec2FA.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when calling 2fa/setup while 2FA is already enabled, got %d", rec2FA.Code)
+	}
+
+	// 3. TOTP replay prevention & brute-force lockout
+	code, _ := auth.TOTPCode(sec, time.Now())
+	if !am.VerifyAndConsumeTOTP("admin", sec, code, time.Now()) {
+		t.Fatalf("expected first TOTP verification to succeed")
+	}
+	if am.VerifyAndConsumeTOTP("admin", sec, code, time.Now()) {
+		t.Fatalf("expected replayed TOTP code in same window to fail")
+	}
+
+	// Trigger TOTP brute-force lockout via /login
+	for i := 0; i < auth.MaxLoginAttempts; i++ {
+		reqGet := httptest.NewRequest("GET", "/login", nil)
+		reqGet.RemoteAddr = "198.51.100.200:4000"
+		recGet := httptest.NewRecorder()
+		h.ServeHTTP(recGet, reqGet)
+		if i == auth.MaxLoginAttempts {
+			break
+		}
+		m := regexp.MustCompile(`name="csrf_token"\s+value="([^"]+)"`).FindStringSubmatch(recGet.Body.String())
+		if len(m) < 2 {
+			t.Fatalf("missing csrf_token on attempt %d (status=%d)", i, recGet.Code)
+		}
+		form := url.Values{
+			"username":     {"admin"},
+			"password":     {"GuardianWAF@2026"},
+			"totp_code":    {"000000"},
+			"csrf_token":   {m[1]},
+			"website_trap": {""},
+		}
+		reqPost := httptest.NewRequest("POST", "/login", strings.NewReader(form.Encode()))
+		reqPost.RemoteAddr = "198.51.100.200:4000"
+		reqPost.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recPost := httptest.NewRecorder()
+		h.ServeHTTP(recPost, reqPost)
+		if i < auth.MaxLoginAttempts-1 && recPost.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d expected 401, got %d", i, recPost.Code)
+		}
+		if i == auth.MaxLoginAttempts-1 && recPost.Code != http.StatusTooManyRequests {
+			t.Fatalf("final attempt expected 429 lockout, got %d", recPost.Code)
+		}
+	}
+
+	// 4. Session revocation on logout
+	reqStatsOK := httptest.NewRequest("GET", "/api/stats", nil)
+	reqStatsOK.Header.Set("Authorization", "Bearer "+audTok)
+	recStatsOK := httptest.NewRecorder()
+	h.ServeHTTP(recStatsOK, reqStatsOK)
+	if recStatsOK.Code != http.StatusOK {
+		t.Fatalf("expected 200 before logout, got %d", recStatsOK.Code)
+	}
+
+	reqLogout := httptest.NewRequest("GET", "/logout", nil)
+	reqLogout.Header.Set("Authorization", "Bearer "+audTok)
+	recLogout := httptest.NewRecorder()
+	h.ServeHTTP(recLogout, reqLogout)
+
+	reqStatsRevoked := httptest.NewRequest("GET", "/api/stats", nil)
+	reqStatsRevoked.Header.Set("Authorization", "Bearer "+audTok)
+	recStatsRevoked := httptest.NewRecorder()
+	h.ServeHTTP(recStatsRevoked, reqStatsRevoked)
+	if recStatsRevoked.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after logout session revocation, got %d", recStatsRevoked.Code)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/theboynewbie/athena-shield/internal/auth"
 	"github.com/theboynewbie/athena-shield/internal/cache"
 	"github.com/theboynewbie/athena-shield/internal/config"
+	"github.com/theboynewbie/athena-shield/internal/geoip"
 	"github.com/theboynewbie/athena-shield/internal/proxy"
 	"github.com/theboynewbie/athena-shield/internal/ratelimit"
 	"github.com/theboynewbie/athena-shield/internal/store"
@@ -23,6 +24,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	geoip.ConfigureTrustedProxies(cfg.TrustedProxies)
 
 	s, err := store.Open(cfg.DataDir, cfg.DefaultAdminUser, cfg.DefaultAdminEmail, cfg.DefaultAdminPass)
 	if err != nil {
@@ -39,7 +41,7 @@ func main() {
 
 	rl := ratelimit.New(cfg, s, notifier)
 	eng := waf.NewEngine(cfg, s, rl)
-	ec := cache.NewEdgeCache()
+	ec := cache.NewEdgeCache(int64(cfg.EdgeCacheMaxMB) * 1024 * 1024)
 	tlsMgr := proxy.NewTLSManager(cfg.DataDir, cfg.ACMEEmail)
 	rt := proxy.NewRouter(cfg, s, eng, rl, ec, notifier, tlsMgr, nil)
 	defer rt.Close()
@@ -74,9 +76,12 @@ func main() {
 	}
 
 	dashSrv := &http.Server{
-		Addr:              ":" + cfg.DashboardPort,
+		Addr:              cfg.DashboardBindAddr + ":" + cfg.DashboardPort,
 		Handler:           webSrv.Handler(),
 		ReadHeaderTimeout: 15 * time.Second,
+	}
+	if cfg.DashboardTLSCert != "" && cfg.DashboardTLSKey != "" {
+		dashSrv.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 
 	go func() {
@@ -94,7 +99,14 @@ func main() {
 	}()
 
 	go func() {
-		log.Printf("[ATHENA SHIELD] Dashboard & API listening on :%s", cfg.DashboardPort)
+		if cfg.DashboardTLSCert != "" && cfg.DashboardTLSKey != "" {
+			log.Printf("[ATHENA SHIELD] Dashboard & API (HTTPS) listening on %s", dashSrv.Addr)
+			if err := dashSrv.ListenAndServeTLS(cfg.DashboardTLSCert, cfg.DashboardTLSKey); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("[ATHENA SHIELD] Dashboard HTTPS server error: %v", err)
+			}
+			return
+		}
+		log.Printf("[ATHENA SHIELD] Dashboard & API listening on %s", dashSrv.Addr)
 		if err := dashSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[ATHENA SHIELD] Dashboard server error: %v", err)
 		}

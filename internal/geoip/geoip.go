@@ -1,18 +1,19 @@
 package geoip
 
 import (
-	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 )
 
 var (
 	cacheMu  sync.RWMutex
 	geoCache = make(map[string][2]string)
 	maxCache = 25000
+
+	trustedProxyMu sync.RWMutex
+	trustedProxies []*net.IPNet
 
 	unejNets []*net.IPNet
 	cfNets   []*net.IPNet
@@ -40,6 +41,47 @@ func init() {
 			cfNets = append(cfNets, n)
 		}
 	}
+}
+
+// ConfigureTrustedProxies parses a comma-separated list of IPs or CIDRs whose
+// X-Real-IP / X-Forwarded-For headers may be trusted.
+func ConfigureTrustedProxies(raw string) {
+	var parsed []*net.IPNet
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		if _, cidr, err := net.ParseCIDR(entry); err == nil {
+			parsed = append(parsed, cidr)
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			bits := 128
+			if v4 := ip.To4(); v4 != nil {
+				ip = v4
+				bits = 32
+			}
+			parsed = append(parsed, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		}
+	}
+	trustedProxyMu.Lock()
+	trustedProxies = parsed
+	trustedProxyMu.Unlock()
+}
+
+func isTrustedProxy(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	trustedProxyMu.RLock()
+	defer trustedProxyMu.RUnlock()
+	for _, n := range trustedProxies {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func IsPrivateOrLoopback(ip net.IP) bool {
@@ -88,16 +130,24 @@ func GetClientIP(r *http.Request) string {
 		realIP = "127.0.0.1"
 	}
 
-	if IsPrivateOrLoopback(peerIP) {
+	if isTrustedProxy(peerIP) {
 		if xri := net.ParseIP(strings.TrimSpace(r.Header.Get("X-Real-IP"))); xri != nil {
 			realIP = xri.String()
 		} else if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
+			var fallback string
 			for i := len(parts) - 1; i >= 0; i-- {
 				if p := net.ParseIP(strings.TrimSpace(parts[i])); p != nil {
-					realIP = p.String()
-					break
+					fallback = p.String()
+					if !isTrustedProxy(p) {
+						realIP = p.String()
+						fallback = ""
+						break
+					}
 				}
+			}
+			if fallback != "" {
+				realIP = fallback
 			}
 		}
 	}
@@ -115,9 +165,9 @@ func Resolve(ipStr, cfCountry string, syncFetch bool) (string, string) {
 	if ipStr == "" || ipStr == "127.0.0.1" || ipStr == "localhost" || ipStr == "::1" {
 		return "LOCAL", "Localhost / Internal"
 	}
-	if len(strings.TrimSpace(cfCountry)) == 2 {
-		cc := strings.ToUpper(strings.TrimSpace(cfCountry))
-		return cc, cc
+	if cc := strings.TrimSpace(cfCountry); len(cc) == 2 && isASCIIAlpha(cc[0]) && isASCIIAlpha(cc[1]) {
+		upper := strings.ToUpper(cc)
+		return upper, upper
 	}
 
 	cacheMu.RLock()
@@ -142,45 +192,11 @@ func Resolve(ipStr, cfCountry string, syncFetch bool) (string, string) {
 		}
 	}
 
-	fetch := func() (string, string, bool) {
-		client := &http.Client{Timeout: 1800 * time.Millisecond}
-		resp, err := client.Get("http://ip-api.com/json/" + ipStr + "?fields=status,country,countryCode")
-		if err != nil {
-			return "", "", false
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != 200 {
-			return "", "", false
-		}
-		var data struct {
-			Status      string `json:"status"`
-			Country     string `json:"country"`
-			CountryCode string `json:"countryCode"`
-		}
-		if json.NewDecoder(resp.Body).Decode(&data) == nil && data.Status == "success" {
-			cc := strings.ToUpper(data.CountryCode)
-			if cc == "" {
-				cc = "UNKNOWN"
-			}
-			cn := data.Country
-			if cn == "" {
-				cn = cc
-			}
-			setCache(ipStr, cc, cn)
-			return cc, cn, true
-		}
-		return "", "", false
-	}
-
-	if syncFetch {
-		if cc, cn, ok := fetch(); ok {
-			return cc, cn
-		}
-		return "GLOBAL", "Global Traffic"
-	}
-
-	go fetch()
 	return "GLOBAL", "Global Traffic"
+}
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
 func setCache(ip, cc, cn string) {

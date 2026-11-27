@@ -39,8 +39,16 @@
                 <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
 
                 <div>
+                    <label class="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Setup Token (One-Time)</label>
+                    <input type="text" name="setup_token" required autofocus autocomplete="off"
+                        placeholder="Tempel token dari log server / docker logs"
+                        class="w-full px-3 py-2 border rounded-lg text-sm font-mono transition-colors">
+                    <p class="text-[11px] text-zinc-400 mt-1">Jalankan <code class="px-1 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800">docker logs athena-shield</code> untuk melihat token sekali pakai.</p>
+                </div>
+
+                <div>
                     <label class="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">Username</label>
-                    <input type="text" name="username" required autofocus minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]{3,32}"
+                    <input type="text" name="username" required minlength="3" maxlength="32" pattern="[a-zA-Z0-9._-]{3,32}"
                         placeholder="Minimal 3 karakter (huruf/angka)" autocomplete="off"
                         class="w-full px-3 py-2 border rounded-lg text-sm transition-colors">
                 </div>

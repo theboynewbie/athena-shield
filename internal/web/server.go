@@ -1,10 +1,14 @@
 package web
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -36,6 +40,7 @@ type Server struct {
 	pages      map[string]*template.Template
 	blockedTpl *template.Template
 	mux        *http.ServeMux
+	setupToken string
 }
 
 type pageData struct {
@@ -99,8 +104,25 @@ func NewServer(
 		blockedTpl: blockedTpl,
 		mux:        http.NewServeMux(),
 	}
+	if s.NeedsSetup() {
+		tok := strings.TrimSpace(cfg.SetupToken)
+		if tok == "" {
+			buf := make([]byte, 16)
+			_, _ = rand.Read(buf)
+			tok = hex.EncodeToString(buf)
+		}
+		srv.setupToken = tok
+		log.Printf("[ATHENA SHIELD] ======================================================")
+		log.Printf("[ATHENA SHIELD] INITIAL SETUP REQUIRED — One-Time Setup Token: %s", srv.setupToken)
+		log.Printf("[ATHENA SHIELD] Open http://<host>:%s/setup and enter this token.", cfg.DashboardPort)
+		log.Printf("[ATHENA SHIELD] ======================================================")
+	}
 	srv.registerRoutes()
 	return srv, nil
+}
+
+func (sv *Server) SetupToken() string {
+	return sv.setupToken
 }
 
 func (sv *Server) Handler() http.Handler {
@@ -278,10 +300,19 @@ func (sv *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 	password := r.FormValue("password")
 	confirm := r.FormValue("confirm_password")
 	csrfToken := r.FormValue("csrf_token")
+	setupToken := strings.TrimSpace(r.FormValue("setup_token"))
 
 	if !sv.auth.VerifyCSRF(csrfToken, clientIP) {
 		sv.renderPage(w, "setup.html", http.StatusForbidden, pageData{
 			Error:     "Token keamanan CSRF tidak valid atau kedaluwarsa. Silakan refresh halaman.",
+			CSRFToken: sv.auth.GenerateCSRF(clientIP),
+		})
+		return
+	}
+
+	if sv.setupToken == "" || subtle.ConstantTimeCompare([]byte(setupToken), []byte(sv.setupToken)) != 1 {
+		sv.renderPage(w, "setup.html", http.StatusForbidden, pageData{
+			Error:     "Setup Token tidak valid. Periksa token sekali pakai di log container (docker logs athena-shield).",
 			CSRFToken: sv.auth.GenerateCSRF(clientIP),
 		})
 		return
@@ -338,9 +369,10 @@ func (sv *Server) handleSetupSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sv.setupToken = ""
 	sv.recordAudit(r, u, "INITIAL_SETUP", u.Username, "Akun Super Admin pertama dibuat melalui Initial Setup Wizard")
 
-	tok, _ := sv.auth.CreateToken(u.Username, u.Role)
+	tok, _ := sv.auth.CreateToken(u.Username, u.Role, u.TokenVersion)
 	isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "access_token",
@@ -493,9 +525,39 @@ func (sv *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 	if u.TOTPEnabled && u.TOTPSecret != "" {
 		totpCode := strings.TrimSpace(r.FormValue("totp_code"))
-		if !auth.VerifyTOTP(u.TOTPSecret, totpCode, time.Now()) {
+		if !sv.auth.VerifyAndConsumeTOTP(u.Username, u.TOTPSecret, totpCode, time.Now()) {
+			ipLocked, remTries := sv.auth.RecordFailedLogin(clientIP, username)
+			if ipLocked {
+				sv.store.QueueLog(store.Log{
+					Timestamp:  time.Now().UTC(),
+					ClientIP:   clientIP,
+					Host:       reqHost,
+					Method:     "POST",
+					URI:        "/login",
+					StatusCode: http.StatusTooManyRequests,
+					IsBlocked:  true,
+					Reason:     "Login 2FA Brute Force Lockout",
+					UserAgent:  r.UserAgent(),
+				})
+				sv.renderPage(w, "login.html", http.StatusTooManyRequests, pageData{
+					Error:     "Terlalu banyak percobaan 2FA gagal. IP Anda dikunci selama 15 menit.",
+					CSRFToken: sv.auth.GenerateCSRF(clientIP),
+				})
+				return
+			}
+			sv.store.QueueLog(store.Log{
+				Timestamp:  time.Now().UTC(),
+				ClientIP:   clientIP,
+				Host:       reqHost,
+				Method:     "POST",
+				URI:        "/login",
+				StatusCode: http.StatusUnauthorized,
+				IsBlocked:  true,
+				Reason:     "Failed 2FA TOTP Attempt",
+				UserAgent:  r.UserAgent(),
+			})
 			sv.renderPage(w, "login.html", http.StatusUnauthorized, pageData{
-				Error:     "Kode 2FA Authenticator wajib diisi dan harus valid (6 digit).",
+				Error:     "Kode 2FA Authenticator tidak valid atau sudah digunakan. Sisa percobaan: " + strconvItoa(remTries) + " kali.",
 				CSRFToken: sv.auth.GenerateCSRF(clientIP),
 			})
 			return
@@ -515,7 +577,7 @@ func (sv *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		UserAgent:  r.UserAgent(),
 	})
 
-	tok, _ := sv.auth.CreateToken(u.Username, u.Role)
+	tok, _ := sv.auth.CreateToken(u.Username, u.Role, u.TokenVersion)
 	isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 	http.SetCookie(w, &http.Cookie{
 		Name:     "access_token",
@@ -531,6 +593,9 @@ func (sv *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 
 func (sv *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	applyLoginSecurityHeaders(w)
+	if u := sv.auth.CurrentUser(r); u != nil {
+		_ = sv.store.BumpUserTokenVersion(u.ID)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     "access_token",
 		Value:    "",

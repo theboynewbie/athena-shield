@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"container/list"
 	"net/http"
 	"strings"
 	"sync"
@@ -8,10 +9,11 @@ import (
 )
 
 const (
-	DefaultHTMLTTL   = 60 * time.Second
-	DefaultStaticTTL = 15 * time.Minute
-	MaxCacheEntries  = 4000
-	MaxEntryBytes    = 4 * 1024 * 1024 // 4MB max per cached item
+	DefaultHTMLTTL            = 60 * time.Second
+	DefaultStaticTTL          = 15 * time.Minute
+	MaxCacheEntries           = 4000
+	MaxEntryBytes             = 4 * 1024 * 1024 // 4MB max per cached item
+	DefaultMaxCacheBytes int64 = 128 * 1024 * 1024
 )
 
 var bypassCookies = []string{
@@ -44,14 +46,31 @@ type Entry struct {
 	ExpiresAt  time.Time
 }
 
-type EdgeCache struct {
-	mu      sync.RWMutex
-	entries map[string]Entry
+type cacheItem struct {
+	key   string
+	entry Entry
+	size  int64
 }
 
-func NewEdgeCache() *EdgeCache {
+type EdgeCache struct {
+	mu         sync.Mutex
+	ll         *list.List
+	items      map[string]*list.Element
+	curBytes   int64
+	maxBytes   int64
+	maxEntries int
+}
+
+func NewEdgeCache(maxBytes ...int64) *EdgeCache {
+	capBytes := DefaultMaxCacheBytes
+	if len(maxBytes) > 0 && maxBytes[0] > 0 {
+		capBytes = maxBytes[0]
+	}
 	return &EdgeCache{
-		entries: make(map[string]Entry),
+		ll:         list.New(),
+		items:      make(map[string]*list.Element),
+		maxBytes:   capBytes,
+		maxEntries: MaxCacheEntries,
 	}
 }
 
@@ -103,21 +122,31 @@ func CacheKey(scheme, method, host, uri string) string {
 	return scheme + "|" + method + "|" + strings.ToLower(host) + "|" + uri
 }
 
+func (c *EdgeCache) removeElement(elem *list.Element) {
+	c.ll.Remove(elem)
+	item := elem.Value.(*cacheItem)
+	delete(c.items, item.key)
+	c.curBytes -= item.size
+	if c.curBytes < 0 {
+		c.curBytes = 0
+	}
+}
+
 func (c *EdgeCache) Get(key string) (Entry, bool) {
 	now := time.Now()
-	c.mu.RLock()
-	ent, ok := c.entries[key]
-	c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.items[key]
 	if !ok {
 		return Entry{}, false
 	}
-	if now.After(ent.ExpiresAt) {
-		c.mu.Lock()
-		delete(c.entries, key)
-		c.mu.Unlock()
+	item := elem.Value.(*cacheItem)
+	if now.After(item.entry.ExpiresAt) {
+		c.removeElement(elem)
 		return Entry{}, false
 	}
-	return ent, true
+	c.ll.MoveToFront(elem)
+	return item.entry, true
 }
 
 func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte, isStatic bool) {
@@ -153,31 +182,56 @@ func (c *EdgeCache) Set(key string, status int, hdr http.Header, body []byte, is
 		ttl = DefaultStaticTTL
 	}
 
+	itemSize := int64(len(body) + len(key) + 256)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.entries) >= MaxCacheEntries {
-		now := time.Now()
-		for k, v := range c.entries {
-			if now.After(v.ExpiresAt) {
-				delete(c.entries, k)
-			}
-		}
-		if len(c.entries) >= MaxCacheEntries {
-			c.entries = make(map[string]Entry)
-		}
+
+	if itemSize > c.maxBytes {
+		return
 	}
-	c.entries[key] = Entry{
+	if existing, ok := c.items[key]; ok {
+		c.removeElement(existing)
+	}
+
+	now := time.Now()
+	for (c.curBytes+itemSize > c.maxBytes || len(c.items) >= c.maxEntries) && c.ll.Len() > 0 {
+		back := c.ll.Back()
+		if back == nil {
+			break
+		}
+		c.removeElement(back)
+	}
+	if c.curBytes+itemSize > c.maxBytes {
+		return
+	}
+
+	ent := Entry{
 		StatusCode: status,
 		Headers:    clonedHdr,
 		Body:       append([]byte(nil), body...),
-		ExpiresAt:  time.Now().Add(ttl),
+		ExpiresAt:  now.Add(ttl),
 	}
+	elem := c.ll.PushFront(&cacheItem{
+		key:   key,
+		entry: ent,
+		size:  itemSize,
+	})
+	c.items[key] = elem
+	c.curBytes += itemSize
 }
 
 func (c *EdgeCache) PurgeAll() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	n := len(c.entries)
-	c.entries = make(map[string]Entry)
+	n := len(c.items)
+	c.items = make(map[string]*list.Element)
+	c.ll.Init()
+	c.curBytes = 0
 	return n
+}
+
+func (c *EdgeCache) Stats() (entries int, totalBytes int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.items), c.curBytes
 }

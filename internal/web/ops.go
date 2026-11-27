@@ -191,6 +191,10 @@ func (sv *Server) api2FAStatus(w http.ResponseWriter, r *http.Request, user *sto
 }
 
 func (sv *Server) api2FASetup(w http.ResponseWriter, r *http.Request, user *store.User) {
+	if user.TOTPEnabled {
+		writeDetailError(w, http.StatusForbidden, "2FA sudah aktif. Nonaktifkan 2FA terlebih dahulu menggunakan password sebelum mengatur ulang.")
+		return
+	}
 	sec, err := auth.GenerateTOTPSecret()
 	if err != nil {
 		writeDetailError(w, 500, "Gagal membuat secret TOTP")
@@ -245,6 +249,23 @@ func (sv *Server) api2FADisable(w http.ResponseWriter, r *http.Request, user *st
 	if err := sv.store.SetUserTOTP(user.ID, "", false); err != nil {
 		writeDetailError(w, 500, err.Error())
 		return
+	}
+	_ = sv.store.BumpUserTokenVersion(user.ID)
+	newVer := user.TokenVersion + 1
+	if newVer <= 1 {
+		newVer = 2
+	}
+	if tok, err := sv.auth.CreateToken(user.Username, user.Role, newVer); err == nil {
+		isSecure := r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+		http.SetCookie(w, &http.Cookie{
+			Name:     "access_token",
+			Value:    "Bearer " + tok,
+			Path:     "/",
+			HttpOnly: true,
+			MaxAge:   int(auth.TokenTTL.Seconds()),
+			SameSite: http.SameSiteLaxMode,
+			Secure:   isSecure,
+		})
 	}
 	sv.recordAudit(r, user, "2FA_DISABLE", user.Username, "2FA TOTP Authenticator dinonaktifkan")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success", "message": "2FA Authenticator dinonaktifkan."})

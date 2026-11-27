@@ -10,6 +10,7 @@ type User struct {
 	Role           string    `json:"role"` // "super_admin", "admin", "auditor"
 	TOTPSecret     string    `json:"-"`
 	TOTPEnabled    bool      `json:"totp_enabled"`
+	TokenVersion   int       `json:"-"`
 	IsActive       bool      `json:"is_active"`
 	CreatedAt      time.Time `json:"created_at"`
 }
@@ -72,7 +73,8 @@ type ProxyHost struct {
 	PreservePath       bool      `json:"preserve_path"`
 	SSLType            string    `json:"ssl_type"` // "none", "letsencrypt", "custom"
 	SSLCert            string    `json:"ssl_cert"`
-	SSLKey             string    `json:"ssl_key"`
+	SSLKey             string    `json:"ssl_key,omitempty"`
+	HasSSLKey          bool      `json:"has_ssl_key"`
 	ForceHTTPS         bool      `json:"force_https"`
 	WAFEnabled         bool      `json:"waf_enabled"`
 	WAFMode            string    `json:"waf_mode"` // "active", "monitor", "bypass"

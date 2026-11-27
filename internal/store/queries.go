@@ -52,12 +52,13 @@ func (s *Store) CreateInitialSuperAdmin(username, email, hashedPass string) (*Us
 		return nil, err
 	}
 	return &User{
-		ID:        id,
-		Username:  username,
-		Email:     email,
-		Role:      "super_admin",
-		IsActive:  true,
-		CreatedAt: now,
+		ID:           id,
+		Username:     username,
+		Email:        email,
+		Role:         "super_admin",
+		TokenVersion: 1,
+		IsActive:     true,
+		CreatedAt:    now,
 	}, nil
 }
 
@@ -65,9 +66,9 @@ func (s *Store) GetUserByUsernameOrEmail(ident string) (*User, error) {
 	u := &User{}
 	var active, totpEn int
 	err := s.db.QueryRow(
-		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), is_active, created_at FROM users WHERE username = ? OR email = ? LIMIT 1`,
+		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), COALESCE(token_version,1), is_active, created_at FROM users WHERE username = ? OR email = ? LIMIT 1`,
 		ident, ident,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &active, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &u.TokenVersion, &active, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -80,9 +81,9 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 	u := &User{}
 	var active, totpEn int
 	err := s.db.QueryRow(
-		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), is_active, created_at FROM users WHERE username = ? AND is_active = 1 LIMIT 1`,
+		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), COALESCE(token_version,1), is_active, created_at FROM users WHERE username = ? AND is_active = 1 LIMIT 1`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &active, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &u.TokenVersion, &active, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +114,11 @@ func (s *Store) ListUsers() ([]User, error) {
 
 func (s *Store) SetUserTOTP(id int64, secret string, enabled bool) error {
 	_, err := s.db.Exec(`UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`, secret, boolToInt(enabled), id)
+	return err
+}
+
+func (s *Store) BumpUserTokenVersion(id int64) error {
+	_, err := s.db.Exec(`UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id = ?`, id)
 	return err
 }
 
@@ -164,12 +170,17 @@ func (s *Store) CreateUser(u *User) error {
 func (s *Store) UpdateUser(id int64, username, email, hashedPass, role *string, isActive *bool) (*User, error) {
 	u := &User{}
 	var active int
-	err := s.db.QueryRow(`SELECT id, username, email, hashed_password, role, is_active, created_at FROM users WHERE id = ?`, id).
-		Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &active, &u.CreatedAt)
+	err := s.db.QueryRow(`SELECT id, username, email, hashed_password, role, COALESCE(token_version,1), is_active, created_at FROM users WHERE id = ?`, id).
+		Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TokenVersion, &active, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	u.IsActive = active == 1
+	if u.TokenVersion <= 0 {
+		u.TokenVersion = 1
+	}
+	oldRole := u.Role
+	bumpVer := false
 	if username != nil && strings.TrimSpace(*username) != "" {
 		u.Username = strings.TrimSpace(*username)
 	}
@@ -178,16 +189,26 @@ func (s *Store) UpdateUser(id int64, username, email, hashedPass, role *string, 
 	}
 	if hashedPass != nil && *hashedPass != "" {
 		u.HashedPassword = *hashedPass
+		bumpVer = true
 	}
 	if role != nil && *role != "" {
 		u.Role = *role
+		if u.Role != oldRole {
+			bumpVer = true
+		}
 	}
 	if isActive != nil {
 		u.IsActive = *isActive
+		if !u.IsActive {
+			bumpVer = true
+		}
+	}
+	if bumpVer {
+		u.TokenVersion++
 	}
 	_, err = s.db.Exec(
-		`UPDATE users SET username=?, email=?, hashed_password=?, role=?, is_active=? WHERE id=?`,
-		u.Username, u.Email, u.HashedPassword, u.Role, boolToInt(u.IsActive), id,
+		`UPDATE users SET username=?, email=?, hashed_password=?, role=?, token_version=?, is_active=? WHERE id=?`,
+		u.Username, u.Email, u.HashedPassword, u.Role, u.TokenVersion, boolToInt(u.IsActive), id,
 	)
 	return u, err
 }

@@ -102,6 +102,7 @@ func (s *Store) migrate() error {
 			role TEXT NOT NULL DEFAULT 'admin',
 			totp_secret TEXT DEFAULT '',
 			totp_enabled INTEGER NOT NULL DEFAULT 0,
+			token_version INTEGER NOT NULL DEFAULT 1,
 			is_active INTEGER NOT NULL DEFAULT 1,
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
@@ -200,6 +201,7 @@ func (s *Store) migrate() error {
 		`ALTER TABLE rules ADD COLUMN paranoia_level INTEGER NOT NULL DEFAULT 1`,
 		`ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''`,
 		`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1`,
 	}
 	for _, q := range alterStmts {
 		_, _ = s.db.Exec(q)
