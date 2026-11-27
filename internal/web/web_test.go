@@ -464,3 +464,96 @@ func TestSprintASecurityHardening(t *testing.T) {
 		t.Fatalf("expected 401 after logout session revocation, got %d", recStatsRevoked.Code)
 	}
 }
+
+func TestSprintCGovernanceAndCompliance(t *testing.T) {
+	srv, s, am := setupTestWebServer(t)
+	h := srv.Handler()
+
+	adminUser, err := s.GetUserByUsername("admin")
+	if err != nil {
+		t.Fatalf("GetUserByUsername: %v", err)
+	}
+	adminTok, _ := am.CreateToken("admin", "super_admin", adminUser.TokenVersion)
+	adminCookie := &http.Cookie{Name: "access_token", Value: "Bearer " + adminTok}
+
+	// 1. Cross-origin cookie CSRF on state-changing API must be rejected (403), same-origin allowed (200) + audit logged
+	reqBadOrigin := httptest.NewRequest("POST", "/api/cache/purge", nil)
+	reqBadOrigin.Host = "example.com"
+	reqBadOrigin.Header.Set("Origin", "https://evil.example")
+	reqBadOrigin.AddCookie(adminCookie)
+	recBadOrigin := httptest.NewRecorder()
+	h.ServeHTTP(recBadOrigin, reqBadOrigin)
+	if recBadOrigin.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on cross-origin cookie POST, got %d", recBadOrigin.Code)
+	}
+
+	reqSameOrigin := httptest.NewRequest("POST", "/api/cache/purge", nil)
+	reqSameOrigin.Host = "example.com"
+	reqSameOrigin.Header.Set("Origin", "http://example.com")
+	reqSameOrigin.AddCookie(adminCookie)
+	recSameOrigin := httptest.NewRecorder()
+	h.ServeHTTP(recSameOrigin, reqSameOrigin)
+	if recSameOrigin.Code != http.StatusOK {
+		t.Fatalf("expected 200 on same-origin cookie POST, got %d (%s)", recSameOrigin.Code, recSameOrigin.Body.String())
+	}
+
+	audits, err := s.ListAuditLogs(20)
+	if err != nil || len(audits) == 0 || audits[0].Action != "PURGE_CACHE" {
+		t.Fatalf("expected PURGE_CACHE in audit logs, got %+v (err=%v)", audits, err)
+	}
+
+	// 2. Weak/empty password rejected on POST /api/users
+	reqWeakUser := httptest.NewRequest("POST", "/api/users", strings.NewReader(`{"username":"newop","email":"op@example.com","password":"123","role":"admin"}`))
+	reqWeakUser.Header.Set("Authorization", "Bearer "+adminTok)
+	recWeakUser := httptest.NewRecorder()
+	h.ServeHTTP(recWeakUser, reqWeakUser)
+	if recWeakUser.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short password on /api/users, got %d", recWeakUser.Code)
+	}
+
+	// 3. Cannot demote or deactivate the sole active super_admin
+	reqDemote := httptest.NewRequest("PUT", "/api/users/1", strings.NewReader(`{"role":"admin"}`))
+	reqDemote.Header.Set("Authorization", "Bearer "+adminTok)
+	recDemote := httptest.NewRecorder()
+	h.ServeHTTP(recDemote, reqDemote)
+	if recDemote.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when demoting last active super_admin, got %d (%s)", recDemote.Code, recDemote.Body.String())
+	}
+
+	reqDeact := httptest.NewRequest("PUT", "/api/users/1", strings.NewReader(`{"is_active":false}`))
+	reqDeact.Header.Set("Authorization", "Bearer "+adminTok)
+	recDeact := httptest.NewRecorder()
+	h.ServeHTTP(recDeact, reqDeact)
+	if recDeact.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when deactivating last active super_admin, got %d", recDeact.Code)
+	}
+
+	// 4. Transactional & validated backup import
+	backupJSON := `{
+		"proxy_hosts": [{"domain_name": "app.example.com", "target_upstream": "http://10.0.0.5:80", "host_type": "invalid_type", "ssl_type": "bogus"}],
+		"ip_lists": [
+			{"ip_address": "198.51.100.50", "list_type": "BLACKLIST", "reason": "valid"},
+			{"ip_address": "not-an-ip", "list_type": "BLACKLIST", "reason": "invalid"}
+		],
+		"settings": {"waf_paranoia_level": "99", "waf_dlp_mode": "monitor", "unknown_key": "ignored"}
+	}`
+	reqBackup := httptest.NewRequest("POST", "/api/backup/import", strings.NewReader(backupJSON))
+	reqBackup.Header.Set("Authorization", "Bearer "+adminTok)
+	recBackup := httptest.NewRecorder()
+	h.ServeHTTP(recBackup, reqBackup)
+	if recBackup.Code != http.StatusOK {
+		t.Fatalf("expected 200 on backup import, got %d (%s)", recBackup.Code, recBackup.Body.String())
+	}
+	hosts, _ := s.ListProxyHosts()
+	if len(hosts) != 1 || hosts[0].HostType != "proxy" || hosts[0].SSLType != "none" {
+		t.Fatalf("expected normalized host_type=proxy and ssl_type=none, got %+v", hosts)
+	}
+	ips, _ := s.ListIPs()
+	if len(ips) != 1 || ips[0].IPAddress != "198.51.100.50" {
+		t.Fatalf("expected only valid IP to be imported, got %+v", ips)
+	}
+	cfgMap := s.GetSettings()
+	if cfgMap["waf_paranoia_level"] != "4" || cfgMap["waf_dlp_mode"] != "monitor" {
+		t.Fatalf("expected clamped waf_paranoia_level=4 and waf_dlp_mode=monitor, got %v", cfgMap)
+	}
+}

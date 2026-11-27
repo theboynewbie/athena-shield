@@ -94,3 +94,26 @@ func TestDecompressGzipCappedAndPublicReason(t *testing.T) {
 		t.Fatalf("unexpected 429 public reason: %q", r429)
 	}
 }
+
+func TestSecurityHeadersSprintC(t *testing.T) {
+	hHTTPS := http.Header{"X-Frame-Options": {"DENY"}}
+	setSecurityHeaders(hHTTPS, true)
+	if hHTTPS.Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("expected existing X-Frame-Options DENY to be preserved, got %q", hHTTPS.Get("X-Frame-Options"))
+	}
+	if hHTTPS.Get("X-XSS-Protection") != "" {
+		t.Fatalf("expected deprecated X-XSS-Protection not to be set")
+	}
+	if hHTTPS.Get("Strict-Transport-Security") == "" {
+		t.Fatalf("expected Strict-Transport-Security on HTTPS")
+	}
+
+	hHTTP := http.Header{}
+	setSecurityHeaders(hHTTP, false)
+	if hHTTP.Get("X-Frame-Options") != "SAMEORIGIN" {
+		t.Fatalf("expected default X-Frame-Options SAMEORIGIN, got %q", hHTTP.Get("X-Frame-Options"))
+	}
+	if hHTTP.Get("Strict-Transport-Security") != "" {
+		t.Fatalf("expected no HSTS on plain HTTP")
+	}
+}

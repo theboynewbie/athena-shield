@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -241,12 +242,34 @@ func writeDetailError(w http.ResponseWriter, status int, detail string) {
 
 type authedHandler func(w http.ResponseWriter, r *http.Request, user *store.User)
 
+func isValidAPICSRFOrigin(r *http.Request) bool {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return true
+	}
+	if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+		return true
+	}
+	if origin := strings.TrimSpace(r.Header.Get("Origin")); origin != "" {
+		u, err := url.Parse(origin)
+		return err == nil && strings.EqualFold(u.Host, r.Host)
+	}
+	if ref := strings.TrimSpace(r.Header.Get("Referer")); ref != "" {
+		u, err := url.Parse(ref)
+		return err == nil && strings.EqualFold(u.Host, r.Host)
+	}
+	return true
+}
+
 func (sv *Server) requireAuthAPI(next authedHandler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u := sv.auth.CurrentUser(r)
 		if u == nil {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeDetailError(w, http.StatusUnauthorized, "Not authenticated")
+			return
+		}
+		if !isValidAPICSRFOrigin(r) {
+			writeDetailError(w, http.StatusForbidden, "Permintaan lintas-origin ditolak (CSRF Origin mismatch).")
 			return
 		}
 		next(w, r, u)

@@ -59,3 +59,20 @@ func TestResolveOfflineNoExternalCall(t *testing.T) {
 		t.Fatalf("expected LOCAL for private IP, got %q", cc3)
 	}
 }
+
+func TestConfiguredTrustedRanges(t *testing.T) {
+	t.Cleanup(func() { ConfigureTrustedRanges("") })
+
+	ConfigureTrustedRanges("")
+	if IsTrustedRange("103.241.204.10") {
+		t.Fatalf("expected public IP 103.241.204.10 not to be trusted by default")
+	}
+
+	ConfigureTrustedRanges("103.241.204.0/22")
+	if !IsTrustedRange("103.241.204.10") {
+		t.Fatalf("expected 103.241.204.10 to be trusted after ConfigureTrustedRanges")
+	}
+	if IsTrustedRange("8.8.8.8") {
+		t.Fatalf("expected unrelated public IP 8.8.8.8 not to be trusted")
+	}
+}

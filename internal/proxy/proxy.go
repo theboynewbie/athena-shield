@@ -205,15 +205,15 @@ func (rt *Router) matchCompiledHost(r *http.Request) (compiledHost, bool) {
 }
 
 func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/healthz" {
-		hostsCnt, hUp, tUp := rt.HealthStats()
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintf(w, `{"status":"ok","engine":"Athena Shield","hosts":%d,"healthy_upstreams":%d,"total_upstreams":%d}`, hostsCnt, hUp, tUp)
-		return
-	}
 	ch, found := rt.matchCompiledHost(r)
 	if !found {
+		if r.URL.Path == "/healthz" {
+			hostsCnt, hUp, tUp := rt.HealthStats()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = fmt.Fprintf(w, `{"status":"ok","engine":"Athena Shield","hosts":%d,"healthy_upstreams":%d,"total_upstreams":%d}`, hostsCnt, hUp, tUp)
+			return
+		}
 		http.Error(w, "Athena Shield: Domain not configured", http.StatusNotFound)
 		return
 	}
@@ -259,11 +259,11 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if host.ForceHTTPS && host.SSLType != "none" && proto == "http" {
-		targetHost := r.Host
-		if targetHost == "" {
-			targetHost = host.DomainName
+		reqURI := r.URL.RequestURI()
+		if !strings.HasPrefix(reqURI, "/") || strings.HasPrefix(reqURI, "//") || strings.HasPrefix(reqURI, `/\`) {
+			reqURI = "/"
 		}
-		targetURL := "https://" + targetHost + r.URL.RequestURI()
+		targetURL := "https://" + host.DomainName + reqURI
 		http.Redirect(w, r, targetURL, http.StatusMovedPermanently)
 		return
 	}
@@ -356,7 +356,6 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					retry = 60
 				}
 				w.Header().Set("Retry-After", fmt.Sprintf("%d", retry))
-				w.Header().Set("X-RateLimit-Limit", "5")
 				w.Header().Set("X-RateLimit-Remaining", "0")
 			}
 
@@ -383,6 +382,8 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rt.logEvent(clientIP, r.Method, r.URL.Path, http.StatusOK, false, "[SHADOW] "+strings.Join(dec.ShadowMatches, "; "), ua, host.DomainName, cfCountry)
 	}
 
+	isHTTPS := r.TLS != nil || strings.EqualFold(proto, "https") || host.SSLType != "none"
+
 	// Edge Cache: Static Assets (always active for clean static GET/HEAD) + Turbo HTML (when host.EdgeCacheEnabled)
 	isStatic := !cache.ShouldBypassStatic(r)
 	useHTMLCache := !isStatic && host.EdgeCacheEnabled && !cache.ShouldBypassHTML(r)
@@ -397,7 +398,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if dec.Mode != "bypass" {
-				setSecurityHeaders(w.Header())
+				setSecurityHeaders(w.Header(), isHTTPS)
 			}
 			w.Header().Set("X-Athena-Cache", "HIT")
 			w.WriteHeader(ent.StatusCode)
@@ -431,7 +432,6 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		flushInterval = -1
 	}
 
-	isHTTPS := r.TLS != nil || strings.EqualFold(proto, "https") || host.SSLType != "none"
 	fwdProto := "http"
 	fwdPort := "80"
 	if isHTTPS {
@@ -467,7 +467,7 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ModifyResponse: func(resp *http.Response) error {
 			resp.Header.Del("Alt-Svc")
 			if dec.Mode != "bypass" {
-				setSecurityHeaders(resp.Header)
+				setSecurityHeaders(resp.Header, isHTTPS)
 			}
 
 			if (resp.StatusCode == http.StatusBadGateway || resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusGatewayTimeout) && ch.pool.Len() > 1 {
@@ -614,7 +614,7 @@ func (rt *Router) logEvent(clientIP, method, uri string, statusCode int, isBlock
 	}
 }
 
-func setSecurityHeaders(h http.Header) {
+func setSecurityHeaders(h http.Header, isHTTPS bool) {
 	// Strip backend version fingerprinting headers
 	h.Del("X-Powered-By")
 	h.Del("X-AspNet-Version")
@@ -622,10 +622,14 @@ func setSecurityHeaders(h http.Header) {
 	h.Del("X-Runtime")
 	h.Set("Server", "Athena-Shield")
 	h.Set("X-Protected-By", "Athena-Shield-v1.0")
-	h.Set("X-Frame-Options", "SAMEORIGIN")
+	if h.Get("X-Frame-Options") == "" {
+		h.Set("X-Frame-Options", "SAMEORIGIN")
+	}
 	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("X-XSS-Protection", "1; mode=block")
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	if isHTTPS && h.Get("Strict-Transport-Security") == "" {
+		h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+	}
 }
 
 func newIncidentID() string {

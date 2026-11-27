@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -545,6 +546,7 @@ func (sv *Server) apiClearLogs(w http.ResponseWriter, r *http.Request, user *sto
 		writeDetailError(w, 500, err.Error())
 		return
 	}
+	sv.recordAudit(r, user, "CLEAR_LOGS", "waf_logs", "Semua log WAF dibersihkan")
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Semua log berhasil dibersihkan"})
 }
 
@@ -594,6 +596,7 @@ func (sv *Server) apiUnbanIP(w http.ResponseWriter, r *http.Request, user *store
 
 func (sv *Server) apiPurgeCache(w http.ResponseWriter, r *http.Request, user *store.User) {
 	purged := sv.edgeCache.PurgeAll()
+	sv.recordAudit(r, user, "PURGE_CACHE", "edge_cache", fmt.Sprintf("%d entri dibersihkan", purged))
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":  "success",
 		"message": fmt.Sprintf("Turbo Edge Cache berhasil dikosongkan (%d entri dibersihkan).", purged),
@@ -622,6 +625,20 @@ func (sv *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, "Invalid JSON")
 		return
 	}
+	uname := strings.TrimSpace(in.Username)
+	email := strings.TrimSpace(in.Email)
+	if len(uname) < 3 || len(uname) > 32 {
+		writeDetailError(w, 400, "Username harus 3–32 karakter")
+		return
+	}
+	if len(email) > 120 || !strings.Contains(email, "@") || !strings.Contains(email, ".") {
+		writeDetailError(w, 400, "Format email tidak valid")
+		return
+	}
+	if len(in.Password) < 8 || len(in.Password) > 128 {
+		writeDetailError(w, 400, "Password minimal 8 karakter dan maksimal 128 karakter")
+		return
+	}
 	hash, err := auth.HashPassword(in.Password)
 	if err != nil {
 		writeDetailError(w, 400, "Password tidak valid")
@@ -631,8 +648,8 @@ func (sv *Server) apiCreateUser(w http.ResponseWriter, r *http.Request, user *st
 		in.Role = "admin"
 	}
 	u := &store.User{
-		Username:       strings.TrimSpace(in.Username),
-		Email:          strings.TrimSpace(in.Email),
+		Username:       uname,
+		Email:          email,
 		HashedPassword: hash,
 		Role:           in.Role,
 		IsActive:       true,
@@ -653,6 +670,11 @@ func (sv *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, "ID tidak valid")
 		return
 	}
+	existing, err := sv.store.GetUserByID(id)
+	if err != nil {
+		writeDetailError(w, 404, "User tidak ditemukan")
+		return
+	}
 	var in struct {
 		Username *string `json:"username"`
 		Email    *string `json:"email"`
@@ -666,7 +688,12 @@ func (sv *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, user *st
 	}
 	var hashed *string
 	if in.Password != nil && strings.TrimSpace(*in.Password) != "" {
-		h, err := auth.HashPassword(strings.TrimSpace(*in.Password))
+		pw := strings.TrimSpace(*in.Password)
+		if len(pw) < 8 || len(pw) > 128 {
+			writeDetailError(w, 400, "Password minimal 8 karakter dan maksimal 128 karakter")
+			return
+		}
+		h, err := auth.HashPassword(pw)
 		if err == nil {
 			hashed = &h
 		}
@@ -678,6 +705,16 @@ func (sv *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, user *st
 		}
 		in.Role = &rNorm
 	}
+	if existing.Role == "super_admin" && existing.IsActive {
+		demoting := in.Role != nil && *in.Role != "super_admin"
+		deactivating := in.IsActive != nil && !*in.IsActive
+		if demoting || deactivating {
+			if cnt, cntErr := sv.store.CountActiveSuperAdmins(); cntErr == nil && cnt <= 1 {
+				writeDetailError(w, 400, "Tidak dapat menonaktifkan atau menurunkan role Super Admin aktif terakhir.")
+				return
+			}
+		}
+	}
 	u, err := sv.store.UpdateUser(id, in.Username, in.Email, hashed, in.Role, in.IsActive)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -687,6 +724,7 @@ func (sv *Server) apiUpdateUser(w http.ResponseWriter, r *http.Request, user *st
 		writeDetailError(w, 400, err.Error())
 		return
 	}
+	sv.recordAudit(r, user, "UPDATE_USER", u.Username, fmt.Sprintf("Role: %s, Active: %v", u.Role, u.IsActive))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": u.ID, "username": u.Username, "email": u.Email, "role": u.Role, "is_active": u.IsActive,
 	})
@@ -705,6 +743,10 @@ func (sv *Server) apiResetPassword(w http.ResponseWriter, r *http.Request, user 
 		writeDetailError(w, 400, "Password baru wajib diisi")
 		return
 	}
+	if len(in.NewPassword) < 8 || len(in.NewPassword) > 128 {
+		writeDetailError(w, 400, "Password baru minimal 8 karakter dan maksimal 128 karakter")
+		return
+	}
 	h, err := auth.HashPassword(in.NewPassword)
 	if err != nil {
 		writeDetailError(w, 400, "Password tidak valid")
@@ -715,6 +757,7 @@ func (sv *Server) apiResetPassword(w http.ResponseWriter, r *http.Request, user 
 		writeDetailError(w, 404, "User tidak ditemukan")
 		return
 	}
+	sv.recordAudit(r, user, "RESET_PASSWORD", u.Username, "Password user direset oleh Super Admin")
 	writeJSON(w, http.StatusOK, map[string]string{"message": fmt.Sprintf("Password untuk user '%s' berhasil diperbarui", u.Username)})
 }
 
@@ -727,6 +770,12 @@ func (sv *Server) apiDeleteUser(w http.ResponseWriter, r *http.Request, user *st
 	if user.ID == id {
 		writeDetailError(w, 400, "Anda tidak dapat menghapus akun Anda sendiri")
 		return
+	}
+	if existing, gErr := sv.store.GetUserByID(id); gErr == nil && existing.Role == "super_admin" && existing.IsActive {
+		if cnt, cntErr := sv.store.CountActiveSuperAdmins(); cntErr == nil && cnt <= 1 {
+			writeDetailError(w, 400, "Tidak dapat menghapus Super Admin aktif terakhir.")
+			return
+		}
 	}
 	if err := sv.store.DeleteUser(id); err != nil {
 		writeDetailError(w, 404, "User tidak ditemukan")
@@ -800,15 +849,59 @@ func (sv *Server) apiGetSettings(w http.ResponseWriter, r *http.Request, user *s
 	})
 }
 
-func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user *store.User) {
-	var in map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeDetailError(w, 400, "Invalid JSON")
-		return
+func clampSettingInt(k string, n int) int {
+	switch k {
+	case "waf_paranoia_level":
+		if n < 1 {
+			return 1
+		}
+		if n > 4 {
+			return 4
+		}
+		return n
+	case "waf_anomaly_threshold":
+		if n < 1 {
+			return 1
+		}
+		if n > 50 {
+			return 50
+		}
+		return n
+	case "waf_js_challenge_difficulty":
+		if n < 12 {
+			return 12
+		}
+		if n > 20 {
+			return 20
+		}
+		return n
+	case "waf_api_rate_limit_max":
+		if n < 5 {
+			return 5
+		}
+		if n > 1000 {
+			return 1000
+		}
+		return n
+	default:
+		if n < 1 {
+			return 1
+		}
+		if n > 3650 {
+			return 3650
+		}
+		return n
 	}
+}
+
+func sanitizeSettingsMap(in map[string]any) map[string]string {
+	defaults := store.DefaultSettings()
 	updates := make(map[string]string)
 	for k, v := range in {
 		if v == nil {
+			continue
+		}
+		if _, allowed := defaults[k]; !allowed {
 			continue
 		}
 		switch val := v.(type) {
@@ -819,49 +912,17 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 				updates[k] = "false"
 			}
 		case float64:
-			n := int(val)
-			switch k {
-			case "waf_paranoia_level":
-				if n < 1 {
-					n = 1
-				} else if n > 4 {
-					n = 4
-				}
-			case "waf_anomaly_threshold":
-				if n < 1 {
-					n = 1
-				} else if n > 50 {
-					n = 50
-				}
-			case "waf_js_challenge_difficulty":
-				if n < 12 {
-					n = 12
-				} else if n > 20 {
-					n = 20
-				}
-			case "waf_api_rate_limit_max":
-				if n < 5 {
-					n = 5
-				} else if n > 1000 {
-					n = 1000
-				}
-			default:
-				if n < 1 {
-					n = 1
-				} else if n > 3650 {
-					n = 3650
-				}
-			}
-			updates[k] = strconv.Itoa(n)
+			updates[k] = strconv.Itoa(clampSettingInt(k, int(val)))
 		case string:
 			s := strings.TrimSpace(val)
-			if k == "waf_dlp_mode" {
+			switch k {
+			case "waf_dlp_mode":
 				if strings.EqualFold(s, "monitor") {
 					s = "monitor"
 				} else {
 					s = "block"
 				}
-			} else if k == "waf_geoip_blocked_countries" {
+			case "waf_geoip_blocked_countries":
 				var clean []string
 				for _, part := range strings.Split(s, ",") {
 					cc := strings.ToUpper(strings.TrimSpace(part))
@@ -870,10 +931,32 @@ func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user
 					}
 				}
 				s = strings.Join(clean, ",")
+			case "waf_paranoia_level", "waf_anomaly_threshold", "waf_js_challenge_difficulty", "waf_api_rate_limit_max", "log_retention_clean_days", "log_retention_attack_days":
+				if n, err := strconv.Atoi(s); err == nil {
+					s = strconv.Itoa(clampSettingInt(k, n))
+				} else {
+					s = defaults[k]
+				}
+			case "telegram_enabled", "telegram_alert_attacks", "telegram_alert_autoban", "telegram_alert_monitor", "telegram_alert_upstream_down", "waf_dlp_enabled", "waf_deep_parse_enabled", "waf_js_challenge_enabled", "waf_bot_fingerprint_enabled":
+				if strings.EqualFold(s, "true") || s == "1" {
+					s = "true"
+				} else {
+					s = "false"
+				}
 			}
 			updates[k] = s
 		}
 	}
+	return updates
+}
+
+func (sv *Server) apiUpdateSettings(w http.ResponseWriter, r *http.Request, user *store.User) {
+	var in map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeDetailError(w, 400, "Invalid JSON")
+		return
+	}
+	updates := sanitizeSettingsMap(in)
 	if err := sv.store.UpdateSettings(updates); err != nil {
 		writeDetailError(w, 500, err.Error())
 		return
@@ -899,6 +982,7 @@ func (sv *Server) apiTestTelegram(w http.ResponseWriter, r *http.Request, user *
 func (sv *Server) apiPruneLogs(w http.ResponseWriter, r *http.Request, user *store.User) {
 	sv.store.FlushLogs()
 	dc, da := sv.store.PruneExpiredLogs()
+	sv.recordAudit(r, user, "PRUNE_LOGS", "waf_logs", fmt.Sprintf("%d clean, %d attack dihapus", dc, da))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":         "success",
 		"deleted_clean":  dc,
@@ -940,7 +1024,7 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 		return
 	}
 
-	var impHosts, impRules, impIPs int
+	var hosts []store.ProxyHost
 	for _, h := range in.ProxyHosts {
 		domStr, _ := h["domain_name"].(string)
 		dom, err := validateDomainName(domStr)
@@ -965,18 +1049,23 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 			}
 		}
 		ht, _ := h["host_type"].(string)
-		if ht == "" {
+		ht = strings.ToLower(strings.TrimSpace(ht))
+		if ht != "redirect" {
 			ht = "proxy"
 		}
 		sslT, _ := h["ssl_type"].(string)
-		if sslT == "" {
+		sslT = strings.ToLower(strings.TrimSpace(sslT))
+		if sslT != "letsencrypt" && sslT != "custom" {
 			sslT = "none"
 		}
 		cert, _ := h["ssl_cert"].(string)
 		key, _ := h["ssl_key"].(string)
 		rsc := 301
-		if v, ok := h["redirect_status_code"].(float64); ok && v > 0 {
-			rsc = int(v)
+		if v, ok := h["redirect_status_code"].(float64); ok {
+			code := int(v)
+			if code == 301 || code == 302 || code == 307 || code == 308 {
+				rsc = code
+			}
 		}
 		pp := getBoolMap(h, "preserve_path", true)
 		fh := getBoolMap(h, "force_https", true)
@@ -984,7 +1073,7 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 		ec := getBoolMap(h, "edge_cache_enabled", false)
 		act := getBoolMap(h, "is_active", true)
 
-		ph := &store.ProxyHost{
+		hosts = append(hosts, store.ProxyHost{
 			DomainName:         dom,
 			TargetUpstream:     up,
 			HostType:           ht,
@@ -1002,12 +1091,10 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 			BlockBadBots:       bbb,
 			EdgeCacheEnabled:   ec,
 			IsActive:           act,
-		}
-		if err := sv.store.UpsertProxyHostByDomain(ph); err == nil {
-			impHosts++
-		}
+		})
 	}
 
+	var rules []store.Rule
 	for _, rm := range in.Rules {
 		rname, _ := rm["name"].(string)
 		rpat, _ := rm["pattern"].(string)
@@ -1035,7 +1122,7 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 		if v, ok := rm["paranoia_level"].(float64); ok && v >= 1 {
 			pl = int(v)
 		}
-		if err := sv.store.UpsertRuleByName(&store.Rule{
+		rules = append(rules, store.Rule{
 			Name:          strings.TrimSpace(rname),
 			Description:   desc,
 			Pattern:       rpat,
@@ -1045,36 +1132,40 @@ func (sv *Server) apiBackupImport(w http.ResponseWriter, r *http.Request, user *
 			Score:         score,
 			ParanoiaLevel: pl,
 			IsActive:      getBoolMap(rm, "is_active", true),
-		}); err == nil {
-			impRules++
-		}
+		})
 	}
 
+	var ips []store.IPList
 	for _, im := range in.IPLists {
 		addr, _ := im["ip_address"].(string)
+		addr = strings.TrimSpace(addr)
 		lt, _ := im["list_type"].(string)
 		lt = strings.ToUpper(strings.TrimSpace(lt))
-		if strings.TrimSpace(addr) == "" || (lt != "BLACKLIST" && lt != "WHITELIST") {
+		if addr == "" || (lt != "BLACKLIST" && lt != "WHITELIST") {
 			continue
 		}
-		reason, _ := im["reason"].(string)
-		if err := sv.store.UpsertIP(&store.IPList{
-			IPAddress: strings.TrimSpace(addr),
-			ListType:  lt,
-			Reason:    reason,
-		}); err == nil {
-			impIPs++
-		}
-	}
-
-	if in.Settings != nil {
-		upd := make(map[string]string)
-		for k, v := range in.Settings {
-			if v != nil {
-				upd[k] = fmt.Sprintf("%v", v)
+		if net.ParseIP(addr) == nil {
+			if _, _, err := net.ParseCIDR(addr); err != nil {
+				continue
 			}
 		}
-		_ = sv.store.UpdateSettings(upd)
+		reason, _ := im["reason"].(string)
+		ips = append(ips, store.IPList{
+			IPAddress: addr,
+			ListType:  lt,
+			Reason:    reason,
+		})
+	}
+
+	var settings map[string]string
+	if in.Settings != nil {
+		settings = sanitizeSettingsMap(in.Settings)
+	}
+
+	impHosts, impRules, impIPs, err := sv.store.ImportBackupTx(hosts, rules, ips, settings)
+	if err != nil {
+		writeDetailError(w, 500, "Gagal memulihkan backup secara atomik: "+err.Error())
+		return
 	}
 
 	sv.recordAudit(r, user, "IMPORT_BACKUP", "configuration", fmt.Sprintf("%d hosts, %d rules, %d IPs", impHosts, impRules, impIPs))

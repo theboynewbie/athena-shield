@@ -25,6 +25,7 @@ import (
 func main() {
 	cfg := config.Load()
 	geoip.ConfigureTrustedProxies(cfg.TrustedProxies)
+	geoip.ConfigureTrustedRanges(cfg.TrustedRanges)
 
 	s, err := store.Open(cfg.DataDir, cfg.DefaultAdminUser, cfg.DefaultAdminEmail, cfg.DefaultAdminPass)
 	if err != nil {

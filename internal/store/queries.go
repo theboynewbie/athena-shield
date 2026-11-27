@@ -92,6 +92,27 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 	return u, nil
 }
 
+func (s *Store) GetUserByID(id int64) (*User, error) {
+	u := &User{}
+	var active, totpEn int
+	err := s.db.QueryRow(
+		`SELECT id, username, email, hashed_password, role, COALESCE(totp_secret,''), COALESCE(totp_enabled,0), COALESCE(token_version,1), is_active, created_at FROM users WHERE id = ? LIMIT 1`,
+		id,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.HashedPassword, &u.Role, &u.TOTPSecret, &totpEn, &u.TokenVersion, &active, &u.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	u.IsActive = active == 1
+	u.TOTPEnabled = totpEn == 1
+	return u, nil
+}
+
+func (s *Store) CountActiveSuperAdmins() (int, error) {
+	var cnt int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'super_admin' AND is_active = 1`).Scan(&cnt)
+	return cnt, err
+}
+
 func (s *Store) ListUsers() ([]User, error) {
 	rows, err := s.db.Query(`SELECT id, username, email, role, COALESCE(totp_enabled,0), is_active, created_at FROM users ORDER BY id ASC`)
 	if err != nil {
@@ -914,6 +935,92 @@ func (s *Store) UpsertIP(item *IPList) error {
 		s.BumpVersion()
 	}
 	return err
+}
+
+func (s *Store) ImportBackupTx(hosts []ProxyHost, rules []Rule, ips []IPList, settings map[string]string) (impHosts, impRules, impIPs int, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	now := time.Now().UTC()
+	for _, h := range hosts {
+		var existingID int64
+		qErr := tx.QueryRow(`SELECT id FROM proxy_hosts WHERE domain_name = ?`, h.DomainName).Scan(&existingID)
+		if qErr == nil {
+			_, err = tx.Exec(
+				`UPDATE proxy_hosts SET domain_name=?, target_upstream=?, host_type=?, redirect_url=?, redirect_status_code=?, preserve_path=?, ssl_type=?, ssl_cert=?, ssl_key=?, force_https=?, waf_enabled=?, waf_mode=?, rate_limit_enabled=?, app_profile=?, block_bad_bots=?, edge_cache_enabled=?, is_active=? WHERE id=?`,
+				h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
+				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+				boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
+				boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), existingID,
+			)
+		} else {
+			_, err = tx.Exec(
+				`INSERT INTO proxy_hosts (domain_name, target_upstream, host_type, redirect_url, redirect_status_code, preserve_path, ssl_type, ssl_cert, ssl_key, force_https, waf_enabled, waf_mode, rate_limit_enabled, app_profile, block_bad_bots, edge_cache_enabled, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
+				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+				boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
+				boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), now,
+			)
+		}
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		impHosts++
+	}
+
+	for _, r := range rules {
+		NormalizeRuleFields(&r)
+		var existingID int64
+		qErr := tx.QueryRow(`SELECT id FROM rules WHERE name = ?`, r.Name).Scan(&existingID)
+		if qErr == nil {
+			_, err = tx.Exec(
+				`UPDATE rules SET name=?, description=?, pattern=?, category=?, action=?, severity=?, score=?, paranoia_level=?, is_active=? WHERE id=?`,
+				r.Name, r.Description, r.Pattern, r.Category, r.Action, r.Severity, r.Score, r.ParanoiaLevel, boolToInt(r.IsActive), existingID,
+			)
+		} else {
+			_, err = tx.Exec(
+				`INSERT INTO rules (name, description, pattern, category, action, severity, score, paranoia_level, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				r.Name, r.Description, r.Pattern, r.Category, r.Action, r.Severity, r.Score, r.ParanoiaLevel, boolToInt(r.IsActive), now,
+			)
+		}
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		impRules++
+	}
+
+	for _, item := range ips {
+		_, err = tx.Exec(
+			`INSERT OR REPLACE INTO ip_lists (id, ip_address, list_type, reason, created_at)
+			 VALUES ((SELECT id FROM ip_lists WHERE ip_address = ?), ?, ?, ?, COALESCE((SELECT created_at FROM ip_lists WHERE ip_address = ?), ?))`,
+			item.IPAddress, item.IPAddress, item.ListType, item.Reason, item.IPAddress, now,
+		)
+		if err != nil {
+			return 0, 0, 0, err
+		}
+		impIPs++
+	}
+
+	if len(settings) > 0 {
+		defaults := DefaultSettings()
+		for k, v := range settings {
+			if _, ok := defaults[k]; !ok {
+				continue
+			}
+			if _, err = tx.Exec(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)`, k, v, now); err != nil {
+				return 0, 0, 0, err
+			}
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, 0, 0, err
+	}
+	s.BumpVersion()
+	return impHosts, impRules, impIPs, nil
 }
 
 func FormatDurationRemaining(sec int) string {

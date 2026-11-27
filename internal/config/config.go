@@ -28,6 +28,7 @@ type Config struct {
 	MaxInspectBodyBytes int
 	MaxNonMultipartBody int
 	TrustedProxies      string
+	TrustedRanges       string
 	SetupToken          string
 	EdgeCacheMaxMB      int
 	DashboardBindAddr   string
@@ -62,6 +63,7 @@ func Load() Config {
 		MaxInspectBodyBytes: getEnvInt("MAX_INSPECT_BODY_BYTES", 2*1024*1024),
 		MaxNonMultipartBody: getEnvInt("MAX_NON_MULTIPART_BODY_BYTES", 10*1024*1024),
 		TrustedProxies:      getEnv("TRUSTED_PROXIES", ""),
+		TrustedRanges:       getEnv("TRUSTED_RANGES", ""),
 		SetupToken:          getEnv("SETUP_TOKEN", ""),
 		EdgeCacheMaxMB:      getEnvInt("EDGE_CACHE_MAX_MB", 128),
 		DashboardBindAddr:   getEnv("DASHBOARD_BIND_ADDR", ""),

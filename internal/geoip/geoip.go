@@ -15,21 +15,13 @@ var (
 	trustedProxyMu sync.RWMutex
 	trustedProxies []*net.IPNet
 
-	unejNets []*net.IPNet
-	cfNets   []*net.IPNet
+	trustedRangeMu sync.RWMutex
+	trustedRanges  []*net.IPNet
+
+	cfNets []*net.IPNet
 )
 
 func init() {
-	for _, cidr := range []string{
-		"103.241.204.0/22",
-		"103.241.205.0/24",
-		"103.160.182.0/24",
-		"103.10.106.0/24",
-	} {
-		if _, n, err := net.ParseCIDR(cidr); err == nil {
-			unejNets = append(unejNets, n)
-		}
-	}
 	for _, cidr := range []string{
 		"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18",
 		"108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17",
@@ -43,9 +35,7 @@ func init() {
 	}
 }
 
-// ConfigureTrustedProxies parses a comma-separated list of IPs or CIDRs whose
-// X-Real-IP / X-Forwarded-For headers may be trusted.
-func ConfigureTrustedProxies(raw string) {
+func parseCIDRList(raw string) []*net.IPNet {
 	var parsed []*net.IPNet
 	for _, part := range strings.Split(raw, ",") {
 		entry := strings.TrimSpace(part)
@@ -65,9 +55,25 @@ func ConfigureTrustedProxies(raw string) {
 			parsed = append(parsed, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
 		}
 	}
+	return parsed
+}
+
+// ConfigureTrustedProxies parses a comma-separated list of IPs or CIDRs whose
+// X-Real-IP / X-Forwarded-For headers may be trusted.
+func ConfigureTrustedProxies(raw string) {
+	parsed := parseCIDRList(raw)
 	trustedProxyMu.Lock()
 	trustedProxies = parsed
 	trustedProxyMu.Unlock()
+}
+
+// ConfigureTrustedRanges parses a comma-separated list of IPs or CIDRs treated
+// as trusted internal/partner ranges with higher rate-limit thresholds.
+func ConfigureTrustedRanges(raw string) {
+	parsed := parseCIDRList(raw)
+	trustedRangeMu.Lock()
+	trustedRanges = parsed
+	trustedRangeMu.Unlock()
 }
 
 func isTrustedProxy(ip net.IP) bool {
@@ -99,7 +105,9 @@ func IsTrustedRange(ipStr string) bool {
 	if IsPrivateOrLoopback(ip) {
 		return true
 	}
-	for _, n := range unejNets {
+	trustedRangeMu.RLock()
+	defer trustedRangeMu.RUnlock()
+	for _, n := range trustedRanges {
 		if n.Contains(ip) {
 			return true
 		}
@@ -184,12 +192,6 @@ func Resolve(ipStr, cfCountry string, syncFetch bool) (string, string) {
 	if IsPrivateOrLoopback(ip) {
 		setCache(ipStr, "LOCAL", "Internal Network (LAN)")
 		return "LOCAL", "Internal Network (LAN)"
-	}
-	for _, n := range unejNets {
-		if n.Contains(ip) {
-			setCache(ipStr, "ID", "Indonesia (Campus)")
-			return "ID", "Indonesia (Campus)"
-		}
 	}
 
 	return "GLOBAL", "Global Traffic"
