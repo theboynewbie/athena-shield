@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{if eq .StatusCode 429}}429 Too Many Requests{{else}}403 Access Forbidden{{end}} — Athena Shield</title>
-
     <script>
         (function() {
             if (localStorage.getItem('athena_theme') === 'dark') {
@@ -12,41 +11,182 @@
             }
         })();
     </script>
-
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', '"SF Pro Display"', 'sans-serif'],
-                        display: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', 'sans-serif'],
-                        mono: ['"Poppins"', '-apple-system', 'BlinkMacSystemFont', '"SF Pro Text"', 'sans-serif'],
-                    }
-                }
-            }
-        }
-    </script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
-        html, body, button { font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', sans-serif; }
-        .tabular-nums { font-variant-numeric: tabular-nums; }
+        *, *::before, *::after { box-sizing: border-box; }
+        :root {
+            --bg: #fafafa;
+            --card-bg: #ffffff;
+            --panel-bg: #f4f4f5;
+            --border: #e4e4e7;
+            --text: #18181b;
+            --muted: #71717a;
+            --subtle: #a1a1aa;
+            --btn-primary-bg: #18181b;
+            --btn-primary-fg: #ffffff;
+            --btn-primary-hover: #27272a;
+            --accent: #e11d48;
+            --warn: #d97706;
+            --ok: #10b981;
+        }
+        html.dark {
+            --bg: #09090b;
+            --card-bg: #111113;
+            --panel-bg: rgba(24, 24, 27, 0.72);
+            --border: #27272a;
+            --text: #fafafa;
+            --muted: #a1a1aa;
+            --subtle: #71717a;
+            --btn-primary-bg: #f4f4f5;
+            --btn-primary-fg: #18181b;
+            --btn-primary-hover: #e4e4e7;
+            --accent: #fb7185;
+            --warn: #fbbf24;
+            --ok: #34d399;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .wrap { width: 100%; max-width: 512px; margin: 16px 0; }
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 28px;
+            text-align: center;
+        }
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--muted);
+            margin-bottom: 14px;
+        }
+        .dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 9999px;
+            background: {{if eq .StatusCode 429}}var(--warn){{else}}var(--accent){{end}};
+        }
+        h1 {
+            margin: 0 0 8px;
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            color: var(--text);
+        }
+        .lead {
+            margin: 0 auto 22px;
+            max-width: 420px;
+            font-size: 12px;
+            line-height: 1.6;
+            color: var(--muted);
+        }
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: left;
+            font-size: 12px;
+            margin-bottom: 22px;
+            font-variant-numeric: tabular-nums;
+        }
+        .panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+            font-weight: 600;
+        }
+        .link-btn {
+            background: none;
+            border: none;
+            padding: 0;
+            font: inherit;
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--muted);
+            cursor: pointer;
+        }
+        .link-btn:hover { color: var(--text); text-decoration: underline; }
+        .rows { display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
+        .row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+        .lbl { color: var(--subtle); flex-shrink: 0; }
+        .val { color: var(--text); font-weight: 500; text-align: right; word-break: break-all; }
+        .val-reason { color: {{if eq .StatusCode 429}}var(--warn){{else}}var(--accent){{end}}; font-weight: 500; text-align: right; word-break: break-all; }
+        .val-uri { color: var(--muted); max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .row-sep { padding-top: 8px; border-top: 1px solid var(--border); }
+        .inc-btn { background: none; border: none; padding: 0; font: inherit; color: var(--text); font-weight: 600; cursor: pointer; }
+        .inc-btn:hover { text-decoration: underline; }
+        .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .btn {
+            padding: 9px 16px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: background-color .15s ease;
+        }
+        .btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); }
+        .btn-primary:hover { background: var(--btn-primary-hover); }
+        .btn-secondary { background: var(--card-bg); color: var(--text); border-color: var(--border); }
+        .btn-secondary:hover { background: var(--panel-bg); }
+        .foot {
+            margin-top: 22px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--subtle);
+            font-variant-numeric: tabular-nums;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 14px;
+            border-radius: 8px;
+            background: var(--btn-primary-bg);
+            color: var(--btn-primary-fg);
+            font-size: 12px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+            transition: all .2s ease;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); }
     </style>
 </head>
-<body class="bg-[#fafafa] dark:bg-[#09090b] text-zinc-900 dark:text-zinc-100 font-sans antialiased min-h-screen flex items-center justify-center p-4 sm:p-6">
-
-    <div class="max-w-lg w-full my-6">
-        <div class="bg-white dark:bg-[#111113] border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 sm:p-8 text-center">
-            <div class="inline-flex items-center gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400 mb-4">
-                <span class="w-1.5 h-1.5 rounded-full {{if eq .StatusCode 429}}bg-amber-500{{else}}bg-rose-500{{end}}"></span>
+<body>
+    <div class="wrap">
+        <div class="card">
+            <div class="brand">
+                <span class="dot"></span>
                 <span>Athena Shield</span>
             </div>
 
-            <h1 class="text-2xl font-display font-semibold tracking-tight text-zinc-900 dark:text-white mb-1.5">
-                {{if eq .StatusCode 429}}429 — Too Many Requests{{else}}403 — Access Forbidden{{end}}
-            </h1>
-            <p class="text-xs text-zinc-500 dark:text-zinc-400 max-w-md mx-auto leading-relaxed mb-6">
+            <h1>{{if eq .StatusCode 429}}429 — Too Many Requests{{else}}403 — Access Forbidden{{end}}</h1>
+            <p class="lead">
                 {{if eq .StatusCode 429}}
                 Frekuensi permintaan melebihi ambang batas keamanan (Rate Limit). Silakan tunggu sebelum mencoba kembali.
                 {{else}}
@@ -54,78 +194,62 @@
                 {{end}}
             </p>
 
-            <!-- Incident Details -->
-            <div class="bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 text-left text-xs mb-6 tabular-nums">
-                <div class="flex items-center justify-between pb-2.5 mb-2.5 border-b border-zinc-200/70 dark:border-zinc-800">
-                    <span class="font-medium text-zinc-700 dark:text-zinc-300">Incident Telemetry</span>
-                    <button onclick="copyDiagnostics()" id="btnCopyReport" class="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-white font-medium">
-                        Salin Laporan
-                    </button>
+            <div class="panel">
+                <div class="panel-head">
+                    <span>Incident Telemetry</span>
+                    <button onclick="copyDiagnostics()" id="btnCopyReport" class="link-btn">Salin Laporan</button>
                 </div>
 
-                <div class="space-y-2 text-[11px]">
-                    <div class="flex justify-between gap-2">
-                        <span class="text-zinc-400">Website</span>
-                        <span class="text-zinc-900 dark:text-white font-medium break-all">{{if .TargetHost}}{{.TargetHost}}{{else}}-{{end}}</span>
+                <div class="rows">
+                    <div class="row">
+                        <span class="lbl">Website</span>
+                        <span class="val">{{if .TargetHost}}{{.TargetHost}}{{else}}-{{end}}</span>
                     </div>
-                    <div class="flex justify-between gap-2">
-                        <span class="text-zinc-400">Client IP</span>
-                        <span class="text-zinc-900 dark:text-white font-medium">{{.ClientIP}}</span>
+                    <div class="row">
+                        <span class="lbl">Client IP</span>
+                        <span class="val">{{.ClientIP}}</span>
                     </div>
                     {{if .RetryAfter}}
-                    <div class="flex justify-between gap-2">
-                        <span class="text-zinc-400">Retry After</span>
-                        <span class="text-amber-600 dark:text-amber-400 font-medium">{{.RetryAfter}} detik</span>
+                    <div class="row">
+                        <span class="lbl">Retry After</span>
+                        <span class="val" style="color: var(--warn);">{{.RetryAfter}} detik</span>
                     </div>
                     {{end}}
-                    <div class="flex justify-between gap-2">
-                        <span class="text-zinc-400">Reason</span>
-                        <span class="{{if eq .StatusCode 429}}text-amber-600 dark:text-amber-400{{else}}text-rose-600 dark:text-rose-400{{end}} text-right break-all">{{.Reason}}</span>
+                    <div class="row">
+                        <span class="lbl">Reason</span>
+                        <span class="val-reason">{{.Reason}}</span>
                     </div>
-                    <div class="flex justify-between gap-2">
-                        <span class="text-zinc-400">URI</span>
-                        <span class="text-zinc-600 dark:text-zinc-300 truncate max-w-[240px]" title="{{.URI}}">{{.URI}}</span>
+                    <div class="row">
+                        <span class="lbl">URI</span>
+                        <span class="val-uri" title="{{.URI}}">{{.URI}}</span>
                     </div>
-                    <div class="flex justify-between gap-2 pt-1 border-t border-zinc-200/70 dark:border-zinc-800">
-                        <span class="text-zinc-400">Incident ID</span>
-                        <button onclick="copyIncidentId()" class="text-zinc-900 dark:text-white font-medium hover:underline" id="incidentIdText">ATH-{{.IncidentID}}</button>
+                    <div class="row row-sep">
+                        <span class="lbl">Incident ID</span>
+                        <button onclick="copyIncidentId()" class="inc-btn" id="incidentIdText">ATH-{{.IncidentID}}</button>
                     </div>
                 </div>
             </div>
 
-            <div class="flex flex-col sm:flex-row items-center justify-center gap-2.5">
-                <button onclick="window.location.reload()"
-                    class="w-full sm:w-auto px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-medium text-xs transition-colors">
-                    Muat Ulang
-                </button>
-                <button onclick="copyDiagnostics()"
-                    class="w-full sm:w-auto px-4 py-2 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 font-medium text-xs transition-colors">
-                    Salin Rincian
-                </button>
+            <div class="actions">
+                <button onclick="window.location.reload()" class="btn btn-primary">Muat Ulang</button>
+                <button onclick="copyDiagnostics()" class="btn btn-secondary">Salin Rincian</button>
             </div>
 
-            <div class="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between text-[11px] text-zinc-400 tabular-nums">
+            <div class="foot">
                 <span>Athena Shield v1.0</span>
                 <span>{{.TimestampStr}}</span>
             </div>
         </div>
     </div>
 
-    <div id="toast" class="fixed bottom-5 right-5 px-4 py-2.5 rounded-lg bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 text-xs shadow-lg flex items-center gap-2 transform translate-y-20 opacity-0 transition-all duration-200 z-50">
-        <i class="fa-solid fa-circle-check text-emerald-400 dark:text-emerald-600"></i>
-        <span id="toastMsg">Tersalin!</span>
-    </div>
+    <div id="toast" class="toast"><span id="toastMsg">Tersalin!</span></div>
 
     <script>
         function showToast(msg) {
             const toast = document.getElementById('toast');
             document.getElementById('toastMsg').innerText = msg;
-            toast.classList.remove('translate-y-20', 'opacity-0');
-            toast.classList.add('translate-y-0', 'opacity-100');
-            setTimeout(() => {
-                toast.classList.remove('translate-y-0', 'opacity-100');
-                toast.classList.add('translate-y-20', 'opacity-0');
-            }, 2500);
+            toast.classList.add('show');
+            setTimeout(() => { toast.classList.remove('show'); }, 2500);
         }
         function copyIncidentId() {
             const idText = document.getElementById('incidentIdText').innerText.trim();

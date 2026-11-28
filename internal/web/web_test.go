@@ -112,8 +112,17 @@ func TestLoginPageAndAuthFlow(t *testing.T) {
 		t.Fatalf("expected 403 for non-super_admin on /api/users, got %d", recViewer.Code)
 	}
 
-	// 6. Prometheus /metrics returns 200 with expected gauges
+	// 6. Prometheus /metrics: remote unauthenticated denied (401), loopback allowed (200)
+	reqMetRemote := httptest.NewRequest("GET", "/metrics", nil)
+	reqMetRemote.RemoteAddr = "192.0.2.1:1234"
+	recMetRemote := httptest.NewRecorder()
+	h.ServeHTTP(recMetRemote, reqMetRemote)
+	if recMetRemote.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated remote /metrics, got %d", recMetRemote.Code)
+	}
+
 	reqMet := httptest.NewRequest("GET", "/metrics", nil)
+	reqMet.RemoteAddr = "127.0.0.1:1234"
 	recMet := httptest.NewRecorder()
 	h.ServeHTTP(recMet, reqMet)
 	if recMet.Code != http.StatusOK || !strings.Contains(recMet.Body.String(), "athena_requests_total") || !strings.Contains(recMet.Body.String(), "athena_go_goroutines") {
@@ -555,5 +564,62 @@ func TestSprintCGovernanceAndCompliance(t *testing.T) {
 	cfgMap := s.GetSettings()
 	if cfgMap["waf_paranoia_level"] != "4" || cfgMap["waf_dlp_mode"] != "monitor" {
 		t.Fatalf("expected clamped waf_paranoia_level=4 and waf_dlp_mode=monitor, got %v", cfgMap)
+	}
+}
+
+func TestSprintDHardening(t *testing.T) {
+	srv, _, _ := setupTestWebServer(t)
+	h := srv.Handler()
+
+	// 1. METRICS_TOKEN rejects ?token= query string and accepts Authorization: Bearer
+	t.Setenv("METRICS_TOKEN", "prom-secret-token-xyz")
+	reqQueryTok := httptest.NewRequest("GET", "/metrics?token=prom-secret-token-xyz", nil)
+	reqQueryTok.RemoteAddr = "127.0.0.1:5000"
+	recQueryTok := httptest.NewRecorder()
+	h.ServeHTTP(recQueryTok, reqQueryTok)
+	if recQueryTok.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 when passing METRICS_TOKEN via query string, got %d", recQueryTok.Code)
+	}
+
+	reqBearerTok := httptest.NewRequest("GET", "/metrics", nil)
+	reqBearerTok.RemoteAddr = "198.51.100.10:5000"
+	reqBearerTok.Header.Set("Authorization", "Bearer prom-secret-token-xyz")
+	recBearerTok := httptest.NewRecorder()
+	h.ServeHTTP(recBearerTok, reqBearerTok)
+	if recBearerTok.Code != http.StatusOK || !strings.Contains(recBearerTok.Body.String(), "athena_requests_total") {
+		t.Fatalf("expected 200 with Bearer METRICS_TOKEN, got %d", recBearerTok.Code)
+	}
+
+	// 2. Dashboard responses include CSP, X-Frame-Options, nosniff, and Permissions-Policy
+	reqLogin := httptest.NewRequest("GET", "/login", nil)
+	reqLogin.RemoteAddr = "127.0.0.1:5000"
+	recLogin := httptest.NewRecorder()
+	h.ServeHTTP(recLogin, reqLogin)
+	if recLogin.Header().Get("Content-Security-Policy") == "" ||
+		recLogin.Header().Get("X-Frame-Options") != "DENY" ||
+		recLogin.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		recLogin.Header().Get("Permissions-Policy") == "" {
+		t.Fatalf("missing security headers on dashboard response: %+v", recLogin.Header())
+	}
+
+	// 3. Self-contained block page contains ZERO external CDN URLs and strict default-src 'none' CSP
+	recBlock := httptest.NewRecorder()
+	srv.RenderBlocked(recBlock, proxy.BlockPageData{
+		ClientIP:     "198.51.100.55",
+		Reason:       "Request Blocked by Security Policy",
+		URI:          "/test",
+		IncidentID:   "ABCD1234",
+		StatusCode:   http.StatusForbidden,
+		TargetHost:   "app.example.com",
+		TimestampStr: "28/11/2026, 12:00:00 WIB",
+	})
+	blockBody := recBlock.Body.String()
+	for _, banned := range []string{"cdn.tailwindcss.com", "cdnjs.cloudflare.com", "fonts.googleapis.com", "cdn.jsdelivr.net"} {
+		if strings.Contains(blockBody, banned) {
+			t.Fatalf("blocked.html still references external CDN %q", banned)
+		}
+	}
+	if !strings.Contains(recBlock.Header().Get("Content-Security-Policy"), "default-src 'none'") {
+		t.Fatalf("expected strict default-src 'none' CSP on block page, got %q", recBlock.Header().Get("Content-Security-Policy"))
 	}
 }

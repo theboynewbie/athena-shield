@@ -4,6 +4,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -33,11 +34,21 @@ func (sv *Server) recordAudit(r *http.Request, user *store.User, action, target,
 
 func (sv *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	if tok := strings.TrimSpace(os.Getenv("METRICS_TOKEN")); tok != "" {
-		authHdr := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		qTok := r.URL.Query().Get("token")
-		if subtle.ConstantTimeCompare([]byte(authHdr), []byte(tok)) != 1 &&
-			subtle.ConstantTimeCompare([]byte(qTok), []byte(tok)) != 1 {
+		authHdr := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+		if subtle.ConstantTimeCompare([]byte(authHdr), []byte(tok)) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
 			http.Error(w, "Unauthorized metrics access", http.StatusUnauthorized)
+			return
+		}
+	} else if sv.auth.CurrentUser(r) == nil {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		ip := net.ParseIP(strings.TrimSpace(host))
+		if ip == nil || !ip.IsLoopback() {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "Unauthorized metrics access (loopback, session, or METRICS_TOKEN required)", http.StatusUnauthorized)
 			return
 		}
 	}

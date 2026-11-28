@@ -19,6 +19,7 @@ import (
 type Store struct {
 	db      *sql.DB
 	dbPath  string
+	encKey  []byte
 	version atomic.Int64
 
 	logCh   chan Log
@@ -50,6 +51,7 @@ func Open(dataDir, adminUser, adminEmail, adminPass string) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	s.SetEncryptionSecret(s.GetOrCreateSecret(os.Getenv("SECRET_KEY")))
 	if err := s.seed(adminUser, adminEmail, adminPass); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -349,19 +351,27 @@ func (s *Store) seed(adminUser, adminEmail, adminPass string) error {
 	return nil
 }
 
+func (s *Store) SetEncryptionSecret(secret string) {
+	s.encKey = deriveEncKey(secret)
+}
+
 func (s *Store) GetOrCreateSecret(envSecret string) string {
 	if len(strings.TrimSpace(envSecret)) >= 32 {
-		return strings.TrimSpace(envSecret)
+		sec := strings.TrimSpace(envSecret)
+		s.encKey = deriveEncKey(sec)
+		return sec
 	}
 	var val string
 	err := s.db.QueryRow(`SELECT value FROM system_settings WHERE key = 'internal_session_secret'`).Scan(&val)
 	if err == nil && len(val) >= 64 {
+		s.encKey = deriveEncKey(val)
 		return val
 	}
 	buf := make([]byte, 32)
 	_, _ = rand.Read(buf)
 	gen := hex.EncodeToString(buf)
 	_, _ = s.db.Exec(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES ('internal_session_secret', ?, ?)`, gen, time.Now().UTC())
+	s.encKey = deriveEncKey(gen)
 	return gen
 }
 

@@ -3,6 +3,15 @@ services:
     build: .
     container_name: athena-shield
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     ports:
       - "80:80"
       - "443:443"
@@ -10,12 +19,16 @@ services:
       - "1081:1081"
     volumes:
       - athena_data:/data
-      - /sys:/host/sys:ro
+      # Optional: mount /sys read-only only if you need host NIC link-speed detection in dashboard
+      # - /sys:/host/sys:ro
     environment:
       TZ: Asia/Jakarta
+      # Replace with your real email before enabling Let's Encrypt
       ACME_EMAIL: admin@example.com
       SECRET_KEY: ""
       TRUSTED_PROXIES: ""
+      TRUSTED_RANGES: ""
+      METRICS_TOKEN: ""
       EDGE_CACHE_MAX_MB: "128"
       UPSTREAM_INSECURE_TLS: "false"
 

@@ -74,6 +74,7 @@ func (s *Store) GetUserByUsernameOrEmail(ident string) (*User, error) {
 	}
 	u.IsActive = active == 1
 	u.TOTPEnabled = totpEn == 1
+	u.TOTPSecret = decryptSecret(s.encKey, u.TOTPSecret)
 	return u, nil
 }
 
@@ -89,6 +90,7 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 	}
 	u.IsActive = active == 1
 	u.TOTPEnabled = totpEn == 1
+	u.TOTPSecret = decryptSecret(s.encKey, u.TOTPSecret)
 	return u, nil
 }
 
@@ -104,6 +106,7 @@ func (s *Store) GetUserByID(id int64) (*User, error) {
 	}
 	u.IsActive = active == 1
 	u.TOTPEnabled = totpEn == 1
+	u.TOTPSecret = decryptSecret(s.encKey, u.TOTPSecret)
 	return u, nil
 }
 
@@ -134,7 +137,8 @@ func (s *Store) ListUsers() ([]User, error) {
 }
 
 func (s *Store) SetUserTOTP(id int64, secret string, enabled bool) error {
-	_, err := s.db.Exec(`UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`, secret, boolToInt(enabled), id)
+	enc := encryptSecret(s.encKey, secret)
+	_, err := s.db.Exec(`UPDATE users SET totp_secret = ?, totp_enabled = ? WHERE id = ?`, enc, boolToInt(enabled), id)
 	return err
 }
 
@@ -268,6 +272,7 @@ func (s *Store) ListProxyHosts() ([]ProxyHost, error) {
 		h.BlockBadBots = bbb == 1
 		h.EdgeCacheEnabled = ec == 1
 		h.IsActive = act == 1
+		h.SSLKey = decryptSecret(s.encKey, h.SSLKey)
 		out = append(out, h)
 	}
 	return out, nil
@@ -288,14 +293,16 @@ func (s *Store) GetProxyHostByID(id int64) (*ProxyHost, error) {
 	h.BlockBadBots = bbb == 1
 	h.EdgeCacheEnabled = ec == 1
 	h.IsActive = act == 1
+	h.SSLKey = decryptSecret(s.encKey, h.SSLKey)
 	return &h, nil
 }
 
 func (s *Store) CreateProxyHost(h *ProxyHost) error {
+	encKey := encryptSecret(s.encKey, h.SSLKey)
 	res, err := s.db.Exec(
 		`INSERT INTO proxy_hosts (domain_name, target_upstream, host_type, redirect_url, redirect_status_code, preserve_path, ssl_type, ssl_cert, ssl_key, force_https, waf_enabled, waf_mode, rate_limit_enabled, app_profile, block_bad_bots, edge_cache_enabled, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
-		boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+		boolToInt(h.PreservePath), h.SSLType, h.SSLCert, encKey, boolToInt(h.ForceHTTPS),
 		boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
 		boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), time.Now().UTC(),
 	)
@@ -309,10 +316,11 @@ func (s *Store) CreateProxyHost(h *ProxyHost) error {
 }
 
 func (s *Store) UpdateProxyHost(h *ProxyHost) error {
+	encKey := encryptSecret(s.encKey, h.SSLKey)
 	_, err := s.db.Exec(
 		`UPDATE proxy_hosts SET domain_name=?, target_upstream=?, host_type=?, redirect_url=?, redirect_status_code=?, preserve_path=?, ssl_type=?, ssl_cert=?, ssl_key=?, force_https=?, waf_enabled=?, waf_mode=?, rate_limit_enabled=?, app_profile=?, block_bad_bots=?, edge_cache_enabled=?, is_active=? WHERE id=?`,
 		h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
-		boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+		boolToInt(h.PreservePath), h.SSLType, h.SSLCert, encKey, boolToInt(h.ForceHTTPS),
 		boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
 		boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), h.ID,
 	)
@@ -848,6 +856,9 @@ func (s *Store) GetSettings() map[string]string {
 		var k, v string
 		if rows.Scan(&k, &v) == nil {
 			if _, ok := merged[k]; ok {
+				if isSensitiveSettingKey(k) {
+					v = decryptSecret(s.encKey, v)
+				}
 				merged[k] = v
 			}
 		}
@@ -861,9 +872,13 @@ func (s *Store) UpdateSettings(updates map[string]string) error {
 		if _, ok := defaults[k]; !ok {
 			continue
 		}
+		storeVal := v
+		if isSensitiveSettingKey(k) {
+			storeVal = encryptSecret(s.encKey, v)
+		}
 		_, err := s.db.Exec(
 			`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)`,
-			k, v, time.Now().UTC(),
+			k, storeVal, time.Now().UTC(),
 		)
 		if err != nil {
 			return err
@@ -946,13 +961,14 @@ func (s *Store) ImportBackupTx(hosts []ProxyHost, rules []Rule, ips []IPList, se
 
 	now := time.Now().UTC()
 	for _, h := range hosts {
+		encKey := encryptSecret(s.encKey, h.SSLKey)
 		var existingID int64
 		qErr := tx.QueryRow(`SELECT id FROM proxy_hosts WHERE domain_name = ?`, h.DomainName).Scan(&existingID)
 		if qErr == nil {
 			_, err = tx.Exec(
 				`UPDATE proxy_hosts SET domain_name=?, target_upstream=?, host_type=?, redirect_url=?, redirect_status_code=?, preserve_path=?, ssl_type=?, ssl_cert=?, ssl_key=?, force_https=?, waf_enabled=?, waf_mode=?, rate_limit_enabled=?, app_profile=?, block_bad_bots=?, edge_cache_enabled=?, is_active=? WHERE id=?`,
 				h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
-				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, encKey, boolToInt(h.ForceHTTPS),
 				boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
 				boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), existingID,
 			)
@@ -960,7 +976,7 @@ func (s *Store) ImportBackupTx(hosts []ProxyHost, rules []Rule, ips []IPList, se
 			_, err = tx.Exec(
 				`INSERT INTO proxy_hosts (domain_name, target_upstream, host_type, redirect_url, redirect_status_code, preserve_path, ssl_type, ssl_cert, ssl_key, force_https, waf_enabled, waf_mode, rate_limit_enabled, app_profile, block_bad_bots, edge_cache_enabled, is_active, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				h.DomainName, h.TargetUpstream, h.HostType, h.RedirectURL, h.RedirectStatusCode,
-				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, h.SSLKey, boolToInt(h.ForceHTTPS),
+				boolToInt(h.PreservePath), h.SSLType, h.SSLCert, encKey, boolToInt(h.ForceHTTPS),
 				boolToInt(h.WAFEnabled), h.WAFMode, boolToInt(h.RateLimitEnabled), h.AppProfile,
 				boolToInt(h.BlockBadBots), boolToInt(h.EdgeCacheEnabled), boolToInt(h.IsActive), now,
 			)
@@ -1010,7 +1026,11 @@ func (s *Store) ImportBackupTx(hosts []ProxyHost, rules []Rule, ips []IPList, se
 			if _, ok := defaults[k]; !ok {
 				continue
 			}
-			if _, err = tx.Exec(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)`, k, v, now); err != nil {
+			storeVal := v
+			if isSensitiveSettingKey(k) {
+				storeVal = encryptSecret(s.encKey, v)
+			}
+			if _, err = tx.Exec(`INSERT OR REPLACE INTO system_settings (key, value, updated_at) VALUES (?, ?, ?)`, k, storeVal, now); err != nil {
 				return 0, 0, 0, err
 			}
 		}
