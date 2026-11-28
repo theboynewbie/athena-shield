@@ -3,6 +3,8 @@ package geoip
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -74,5 +76,41 @@ func TestConfiguredTrustedRanges(t *testing.T) {
 	}
 	if IsTrustedRange("8.8.8.8") {
 		t.Fatalf("expected unrelated public IP 8.8.8.8 not to be trusted")
+	}
+}
+
+func TestOfflineGeoIPCSVLoader(t *testing.T) {
+	t.Cleanup(ResetOfflineGeoIP)
+
+	csvPath := filepath.Join(t.TempDir(), "geoip.csv")
+	content := `# Comment line
+203.0.113.0/24,ID,Indonesia
+"16777216","16777471","AU","Australia"
+2001:db8:abcd::/48,SG,Singapore
+`
+	if err := os.WriteFile(csvPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write temp geoip csv: %v", err)
+	}
+
+	n, err := LoadGeoIPCSV(csvPath)
+	if err != nil {
+		t.Fatalf("LoadGeoIPCSV: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("expected 3 ranges loaded, got %d", n)
+	}
+
+	if cc, cn := Resolve("203.0.113.42", "", false); cc != "ID" || cn != "Indonesia" {
+		t.Fatalf("expected (ID, Indonesia), got (%q, %q)", cc, cn)
+	}
+	// 16777216 == 1.0.0.0
+	if cc, cn := Resolve("1.0.0.10", "", false); cc != "AU" || cn != "Australia" {
+		t.Fatalf("expected (AU, Australia), got (%q, %q)", cc, cn)
+	}
+	if cc, cn := Resolve("2001:db8:abcd::42", "", false); cc != "SG" || cn != "Singapore" {
+		t.Fatalf("expected (SG, Singapore), got (%q, %q)", cc, cn)
+	}
+	if cc, _ := Resolve("8.8.8.8", "", false); cc != "GLOBAL" {
+		t.Fatalf("expected GLOBAL for unlisted IP, got %q", cc)
 	}
 }

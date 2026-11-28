@@ -26,6 +26,13 @@ func main() {
 	cfg := config.Load()
 	geoip.ConfigureTrustedProxies(cfg.TrustedProxies)
 	geoip.ConfigureTrustedRanges(cfg.TrustedRanges)
+	if cfg.GeoIPDBPath != "" {
+		if n, geoErr := geoip.LoadGeoIPCSV(cfg.GeoIPDBPath); geoErr != nil {
+			log.Printf("[ATHENA SHIELD] Warning: Failed to load GEOIP_DB_PATH (%s): %v", cfg.GeoIPDBPath, geoErr)
+		} else {
+			log.Printf("[ATHENA SHIELD] Loaded %d offline GeoIP ranges from %s", n, cfg.GeoIPDBPath)
+		}
+	}
 
 	s, err := store.Open(cfg.DataDir, cfg.DefaultAdminUser, cfg.DefaultAdminEmail, cfg.DefaultAdminPass)
 	if err != nil {

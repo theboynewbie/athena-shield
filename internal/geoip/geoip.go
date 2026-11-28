@@ -193,6 +193,10 @@ func Resolve(ipStr, cfCountry string, syncFetch bool) (string, string) {
 		setCache(ipStr, "LOCAL", "Internal Network (LAN)")
 		return "LOCAL", "Internal Network (LAN)"
 	}
+	if cc, cn, ok := lookupOfflineDB(ip); ok {
+		setCache(ipStr, cc, cn)
+		return cc, cn
+	}
 
 	return "GLOBAL", "Global Traffic"
 }
